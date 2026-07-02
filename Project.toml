@@ -1,11 +1,4 @@
 name = "Logit"
-uuid = "9e40c5d1-2a1e-4b3f-a5b5-5f5e5f5e5f5e"
+uuid = "56ed5f9e-c32e-46b8-b489-5928d745fddb"
 version = "0.1.0"
-
-[deps]
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c51"
-ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-
-[compat]
-julia = "1.9"
-ForwardDiff = "0.10"
+authors = ["votroto <tomas.votroubek@outlook.com>"]
