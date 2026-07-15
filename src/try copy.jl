@@ -1,5 +1,9 @@
 using ForwardDiff
 using LinearAlgebra
+using UnicodePlots
+
+# reuse jacobian from corrector in predictor
+# (or if none were computed use secant?)
 
 function predict(system, x, t, lastdx, lastdt)
     hx = ForwardDiff.jacobian(x -> system(x, t), x)
@@ -54,12 +58,17 @@ function hc(startx, startt, endt, system; max_iters=2000)
     dt = sign(endt - startt)
     ds = 0.01
     i=0
+    xs = [x]
+    ts = [t]
     while sign(endt-startt) * (t - endt) <= 1e-3 && i <= max_iters
         dx, dt = predict(system, x, t, dx, dt)
         x, t, ds = correct(system, x, t, dx, dt, ds)
         i+=1
+        push!(xs, x)
+        push!(ts, t)
     end
-    return x
+    @show i
+    return x, xs, ts
 end
 
 
@@ -73,4 +82,6 @@ H(v, lam) = lam*f(v[1])+(1-lam)*g(v[1])
 
 guess = 8/3*T/P
 
-x1 = hc(guess, 0.0, 2.0, H)
+x1, xs1, ts1 = hc(guess, 0.0, 2.0, H)
+
+scatterplot(xs1, ts1, xlabel="x", ylabel="t")

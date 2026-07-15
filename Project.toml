@@ -2,3 +2,13 @@ name = "Logit"
 uuid = "56ed5f9e-c32e-46b8-b489-5928d745fddb"
 version = "0.1.0"
 authors = ["votroto <tomas.votroubek@outlook.com>"]
+
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+UnicodePlots = "b8865327-cd53-5732-bb35-84acbb429228"
+
+[compat]
+BenchmarkTools = "1.8.0"
+ForwardDiff = "1.4.1"
+UnicodePlots = "3.8.4"
