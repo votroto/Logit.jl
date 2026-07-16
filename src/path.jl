@@ -2,9 +2,16 @@ using ForwardDiff
 using LinearAlgebra
 using UnicodePlots
 
-function predict(system, x, t, lastdx, lastdt)
-    hx = ForwardDiff.jacobian(x -> system(x, t), x)
-    ht = ForwardDiff.derivative(t -> system(x, t), t)
+function predict(system, jac_l, jac_x, x, t, lastdx, lastdt)
+    println("predict")
+    @time hx = ForwardDiff.jacobian(x -> system(x, t), x)
+    @time ht = ForwardDiff.derivative(t -> system(x, t), t)
+    @time hx = jac_x(x, t)
+    @time ht = jac_l(x, t)
+
+    #println()
+    #display(hx - jx)
+    #println()
 
     dxdt = (hx \ ht)
 
@@ -23,7 +30,7 @@ function update_stepsize(ds, iters; target_iters=2)
     ds * (1.1 + (target_iters - iters)/4)
 end
 
-function correct(system, xlast, tlast, dx, dt, ds; iters=3, eps=1e-6)
+function correct(system, jac_l, jac_x, xlast, tlast, dx, dt, ds; iters=3, eps=1e-6)
     xpred, tpred = xlast + ds * dx, tlast + ds * dt
     x, t = xpred, tpred
 
@@ -32,14 +39,22 @@ function correct(system, xlast, tlast, dx, dt, ds; iters=3, eps=1e-6)
         r_sys = system(x, t)
         r_con = dot(x - xpred, dx) + (t - tpred) * dt
 
-        if dot(r_sys, r_sys) + r_con ^ 2 < eps^2
+        if dot(r_sys, r_sys) + r_con ^ 2 < eps^2 && i >= 1
+            @show i
             return x, t, update_stepsize(ds, i)
         elseif i >= iters
             return correct(system, xlast, tlast, dx, dt, ds * 0.5)
         end
 
-        Fx = ForwardDiff.jacobian(A -> system(A, t), x)
-        Ft = ForwardDiff.derivative(B -> system(x, B), t)
+        println("correct $i")
+        @time Fx = ForwardDiff.jacobian(A -> system(A, t), x)
+        @time Ft = ForwardDiff.derivative(B -> system(x, B), t)
+        @time Fx = jac_x(x, t)
+        @time Ft = jac_l(x, t)
+#
+        #println()
+        #display(Fx - jx)
+        #println()
 
         v = Fx \ Ft
         w = Fx \ (-r_sys)
@@ -56,7 +71,7 @@ function correct(system, xlast, tlast, dx, dt, ds; iters=3, eps=1e-6)
     return x, t, ds
 end
 
-function hc(startx, startt, endt, system; max_iters=300)
+function hc(startx, startt, endt, system, jac_l, jac_x; max_iters=300)
     x = startx
     t = startt
     dx = zero(startx)
@@ -64,10 +79,13 @@ function hc(startx, startt, endt, system; max_iters=300)
     ds = 0.01
     i=0
     while sign(endt-startt) * (t - endt) <= 1e-3 && i <= max_iters
-        dx, dt = predict(system, x, t, dx, dt)
-        x, t, ds = correct(system, x, t, dx, dt, ds)
+        dx, dt = predict(system, jac_l, jac_x, x, t, dx, dt)
+        #@show dt, ds
+        x, t, ds = correct(system, jac_l, jac_x, x, t, dx, dt, ds)
         i+=1
     end
+        @show i
+
     return x
 end
 
