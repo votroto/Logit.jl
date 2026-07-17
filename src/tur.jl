@@ -14,14 +14,23 @@ function jac_l(x, lam, u)
 end
 
 function point_to_strat(x)
-    c = maximum(x)
+    T = eltype(x)
+
+    c = max(zero(T), maximum(x))
+
     ex = exp.(x .- c)
-    denom = exp(-c) + sum(ex)
+    ref = exp(-c)
+
+    denom = ref + sum(ex)
+
     y = similar(x, length(x)+1)
-    for i in eachindex(x)
+
+    @inbounds for i in eachindex(x)
         y[i] = ex[i] / denom
     end
-    y[end] = exp(-c) / denom
+
+    y[end] = ref / denom
+
     return y
 end
 
@@ -41,9 +50,9 @@ function unilateral_deviations_simple(
 
     result = ntuple(i -> zeros(T, size(payoffs[i], i)), N)
     for i in CartesianIndices(first(payoffs))
-        @inbounds w = prod(x[z][i[z]] for z in 1:N)
         @simd for p in 1:N
-            @inbounds result[p][i[p]] += (w/x[p][i[p]]) * payoffs[p][i]
+            @inbounds w = prod(x[z][i[z]] for z in 1:N if z != p)
+            @inbounds result[p][i[p]] += (w) * payoffs[p][i]
         end
     end
     result
@@ -69,34 +78,30 @@ function H(x, lambda, u)
      for a in eachindex(mu[p])]
 end
 
-
 function unilateral_derivatives(
     payoffs::NTuple{N,<:AbstractArray{P,N}},
     x::NTuple{N,<:AbstractVector{X}}
 ) where {N,P,X}
     T = promote_type(P, X)
 
-    # result[p][q] will hold a matrix of size (size_p, size_q)
-    # representing ∂ū_p[j] / ∂π_q[m]
     result = ntuple(p ->
-        ntuple(q -> zeros(T, size(payoffs[p], p), size(payoffs[p], q)), N),
+            ntuple(q -> zeros(T, size(payoffs[p], p), size(payoffs[p], q)), N),
         N
     )
 
     for i in CartesianIndices(first(payoffs))
-        # Complete joint probability product
-        @inbounds w = prod(x[z][i[z]] for z in 1:N)
-
-        # We need to compute the derivative of player p's expected payoff
-        # with respect to player q's strategy
         for p in 1:N
             for q in 1:N
-                p == q && continue  # ∂ū_p / ∂π_p is always 0
+                p == q && continue
 
-                # Divide out both player p and player q's probabilities
-                @inbounds w_deriv = w / (x[p][i[p]] * x[q][i[q]])
+                # Compute the joint probability of all players EXCEPT p and q
+                w_deriv = one(T)
+                for z in 1:N
+                    if z != p && z != q
+                        @inbounds w_deriv *= x[z][i[z]]
+                    end
+                end
 
-                # Accumulate into the (action_p, action_q) slot
                 @inbounds result[p][q][i[p], i[q]] += w_deriv * payoffs[p][i]
             end
         end
@@ -105,7 +110,7 @@ function unilateral_derivatives(
 end
 
 function jac_x(x, lam, u, system)
-    #fw = ForwardDiff.jacobian(x -> system(x, lam), x)
+    fw = ForwardDiff.jacobian(x -> system(x, lam), x)
 
     # d F_ij / d mu_lk
     J = zeros(length(x), length(x))
@@ -137,7 +142,7 @@ function jac_x(x, lam, u, system)
     end
 
     #println("start")
-    #display(norm(fw - J))
+    display(norm(fw - J))
     #println("stop")
 
     J
@@ -147,17 +152,20 @@ end
 A::Matrix{Float64} = [0.0 1.0 4.0; 1.0 0.0 1.0; 4.0 1.0 0.0]
 B::Matrix{Float64} = -[0.0 1.0 4.0; 1.0 0.0 1.0; 4.0 1.0 0.0]
 
-A = randn(20,20)
-B = randn(20,20)
+A = randn(5, 5)
+B = randn(5, 5)
 
 S(x, lam) = H(x, lam, (A, B))
 Sl(x, lam) = jac_l(x, lam, (A, B))
 Sx(x, lam) = jac_x(x, lam, (A, B), S)
 
-guess_reduced = [strat_to_point(fill(1/size(A,1),size(A,1))); strat_to_point(fill(1/size(A,2),size(A,2)))]
+guess_reduced = [strat_to_point(fill(1/size(A, 1), size(A, 1))); strat_to_point(fill(1/size(A, 2), size(A, 2)))]
 
-x1 = hc(guess_reduced, 0.0, 100.0, S, Sl, Sx)
+x1 = hc(guess_reduced, 0.0, 500.0, S, Sl, Sx)
 
 mu = splitviews(x1, size(A) .- 1)
 pi = point_to_strat.(mu)
 
+println(round.(pi[1]; digits=5))
+println(round.(pi[2]; digits=5))
+nothing
