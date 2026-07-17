@@ -2,7 +2,7 @@ using ForwardDiff
 using LinearAlgebra
 using UnicodePlots
 
-function predict(system, jac_l, jac_x, x, t, lastdx, lastdt)
+function predict(system, jac_l, jac_x, x::Vector{Float64}, t::Float64, lastdx::Vector{Float64}, lastdt::Float64)
     #println("predict")
     #@time hx = ForwardDiff.jacobian(x -> system(x, t), x)
     #@time ht = ForwardDiff.derivative(t -> system(x, t), t)
@@ -26,11 +26,7 @@ function predict(system, jac_l, jac_x, x, t, lastdx, lastdt)
     return dxds, dtds
 end
 
-function update_stepsize(ds, iters; target_iters=2)
-    ds * (1.1 + (target_iters - iters)/4)
-end
-
-function correct(system, jac_l, jac_x, xlast, tlast, dx, dt, ds; iters=3, eps=1e-6)
+function correct(system, jac_l, jac_x, xlast::Vector{Float64}, tlast::Float64, dx::Vector{Float64}, dt::Float64, ds::Float64; iters::Int=3, abs_tol::Float64=1e-6, rel_tol::Float64=1e-12)
     xpred, tpred = xlast + ds * dx, tlast + ds * dt
     x, t = xpred, tpred
 
@@ -39,23 +35,20 @@ function correct(system, jac_l, jac_x, xlast, tlast, dx, dt, ds; iters=3, eps=1e
         r_sys = system(x, t)
         r_con = dot(x - xpred, dx) + (t - tpred) * dt
 
-        if dot(r_sys, r_sys) + r_con ^ 2 < eps^2
-            #@show i, t
-            return x, t, update_stepsize(ds, i)
+        # 1. Absolute residual check
+        if dot(r_sys, r_sys) + r_con ^ 2 < abs_tol^2
+            return x, t, ds
         elseif i >= iters
-            println("fail")
-            return correct(system, xlast, tlast, dx, dt, ds * 0.5)
+            println("decel")
+            if ds >= 1e-4
+                return correct(system, jac_l, jac_x, xlast, tlast, dx, dt, ds * 0.5; iters=iters, abs_tol=abs_tol, rel_tol=rel_tol)
+            else
+                error("can't follow path: step size too small")
+            end
         end
 
-       # println("correct $i")
-        #Fx = ForwardDiff.jacobian(A -> system(A, t), x)
-        #Ft = ForwardDiff.derivative(B -> system(x, B), t)
         Fx = jac_x(x, t)
         Ft = jac_l(x, t)
-
-        #println()
-        #display(Fx - jx)
-        #println()
 
         v = Fx \ Ft
         w = Fx \ (-r_sys)
@@ -63,11 +56,20 @@ function correct(system, jac_l, jac_x, xlast, tlast, dx, dt, ds; iters=3, eps=1e
         dt_step = (-r_con - dot(dx, w)) / (dt - dot(dx, v))
         dx_step = w - dt_step * v
 
+        # 2. Relative step size check (NEW)
+        # If the step we are about to take is smaller than Float64 noise at this scale,
+        # we have converged as far as the hardware allows.
+        step_norm = sqrt(dot(dx_step, dx_step) + dt_step^2)
+        val_norm = sqrt(dot(x, x) + t^2)
+
+        if step_norm < rel_tol * val_norm
+            return x, t, ds
+        end
+
         x = x + dx_step
         t = t + dt_step
         i += 1
     end
-
 
     return x, t, ds
 end
@@ -79,13 +81,27 @@ function hc(startx, startt, endt, system, jac_l, jac_x; max_iters=1000)
     dt = sign(endt - startt)
     ds = 0.01
     i=0
+    succs = 0
     while sign(endt-startt) * (t - endt) <= 1e-3 # && i <= max_iters
         dx, dt = predict(system, jac_l, jac_x, x, t, dx, dt)
         #@show dt, ds
-        x, t, ds = correct(system, jac_l, jac_x, x, t, dx, dt, ds)
+        x, t, nds = correct(system, jac_l, jac_x, x, t, dx, dt, ds)
+        if nds == ds
+            print(".")
+            succs += 1
+        else
+            @show x, t, nds
+            succs = 0
+            ds = nds
+        end
+        if succs >= 4
+            succs = 0
+            ds *= 2
+        end
+
         i+=1
     end
-        @show i
+    @show i
 
     return x
 end

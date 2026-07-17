@@ -2,15 +2,24 @@ include("path.jl")
 
 
 
-function jac_l(x, lam, u)
+function jac_l(x, lam, u, system)
+    #    fw = ForwardDiff.derivative(lam -> system(x, lam), lam)
+
     mu = splitviews(x, size(first(u)) .- 1)
     pi = point_to_strat.(mu)
 
     ubar = unilateral_deviations_simple(u, pi)
 
-    [ubar[p][end] - ubar[p][a]
+    J = [ubar[p][end] - ubar[p][a]
      for p in eachindex(u)
      for a in eachindex(mu[p])]
+
+
+    #println("start")
+  #  @assert (norm(fw - J)) <= 1e-9
+    #println("stop")
+
+    J
 end
 
 function point_to_strat(x)
@@ -110,7 +119,7 @@ function unilateral_derivatives(
 end
 
 function jac_x(x, lam, u, system)
-    fw = ForwardDiff.jacobian(x -> system(x, lam), x)
+  #  fw = ForwardDiff.jacobian(x -> system(x, lam), x)
 
     # d F_ij / d mu_lk
     J = zeros(length(x), length(x))
@@ -142,26 +151,25 @@ function jac_x(x, lam, u, system)
     end
 
     #println("start")
-    display(norm(fw - J))
+#@assert (norm(fw - J)) <= 1e-9
     #println("stop")
 
     J
 end
 
 
-A::Matrix{Float64} = [0.0 1.0 4.0; 1.0 0.0 1.0; 4.0 1.0 0.0]
-B::Matrix{Float64} = -[0.0 1.0 4.0; 1.0 0.0 1.0; 4.0 1.0 0.0]
-
-A = randn(5, 5)
-B = randn(5, 5)
+A = randn(20, 20)
+B = randn(20, 20)
 
 S(x, lam) = H(x, lam, (A, B))
-Sl(x, lam) = jac_l(x, lam, (A, B))
+Sl(x, lam) = jac_l(x, lam, (A, B), S)
 Sx(x, lam) = jac_x(x, lam, (A, B), S)
 
 guess_reduced = [strat_to_point(fill(1/size(A, 1), size(A, 1))); strat_to_point(fill(1/size(A, 2), size(A, 2)))]
 
-x1 = hc(guess_reduced, 0.0, 500.0, S, Sl, Sx)
+x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
+
+@time x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
 
 mu = splitviews(x1, size(A) .- 1)
 pi = point_to_strat.(mu)
