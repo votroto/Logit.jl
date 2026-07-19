@@ -3,15 +3,8 @@ using LinearAlgebra
 using UnicodePlots
 
 function predict(system, jac_l, jac_x, x::Vector{Float64}, t::Float64, lastdx::Vector{Float64}, lastdt::Float64)
-    #println("predict")
-    #@time hx = ForwardDiff.jacobian(x -> system(x, t), x)
-    #@time ht = ForwardDiff.derivative(t -> system(x, t), t)
     hx = jac_x(x, t)
     ht = jac_l(x, t)
-
-    #println()
-    #display(hx - jx)
-    #println()
 
     dxdt = (hx \ ht)
 
@@ -39,7 +32,7 @@ function correct(system, jac_l, jac_x, xlast::Vector{Float64}, tlast::Float64, d
         if dot(r_sys, r_sys) + r_con ^ 2 < abs_tol^2
             return x, t, ds
         elseif i >= iters
-            println("decel")
+           # println("decel")
             if ds >= 1e-4
                 return correct(system, jac_l, jac_x, xlast, tlast, dx, dt, ds * 0.5; iters=iters, abs_tol=abs_tol, rel_tol=rel_tol)
             else
@@ -50,8 +43,13 @@ function correct(system, jac_l, jac_x, xlast::Vector{Float64}, tlast::Float64, d
         Fx = jac_x(x, t)
         Ft = jac_l(x, t)
 
-        v = Fx \ Ft
-        w = Fx \ (-r_sys)
+        v = similar(Ft)
+        w = similar(r_sys)
+        @. r_sys = -r_sys
+
+        lu_res = lu!(Fx)
+        ldiv!(v, lu_res, Ft)
+        ldiv!(w, lu_res, r_sys)
 
         dt_step = (-r_con - dot(dx, w)) / (dt - dot(dx, v))
         dx_step = w - dt_step * v
@@ -83,14 +81,16 @@ function hc(startx, startt, endt, system, jac_l, jac_x; max_iters=1000)
     i=0
     succs = 0
     while sign(endt-startt) * (t - endt) <= 1e-3 # && i <= max_iters
+        #println("pred")
         dx, dt = predict(system, jac_l, jac_x, x, t, dx, dt)
-        #@show dt, ds
+        #println("corr")
         x, t, nds = correct(system, jac_l, jac_x, x, t, dx, dt, ds)
+        #println(".")
         if nds == ds
-            print(".")
+   #         print(".")
             succs += 1
         else
-            @show x, t, nds
+         #   @show x, t, nds
             succs = 0
             ds = nds
         end
@@ -120,3 +120,5 @@ guess = 8/3*T/P
 x1, xs1, ts1 = hc(guess, 0.0, 2.0, H)
 
 scatterplot(xs1, ts1, xlabel="x", ylabel="t")=#
+
+
