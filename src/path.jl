@@ -25,11 +25,12 @@ function correct(system, jac_l, jac_x, xlast::Vector{Float64}, tlast::Float64, d
 
     i = 0
     while true
-        r_sys = system(x, t)
+        @time r_sys = system(x, t)
         r_con = dot(x - xpred, dx) + (t - tpred) * dt
 
         # 1. Absolute residual check
         if dot(r_sys, r_sys) + r_con ^ 2 < abs_tol^2
+            println("-")
             return x, t, ds
         elseif i >= iters
            # println("decel")
@@ -81,11 +82,8 @@ function hc(startx, startt, endt, system, jac_l, jac_x; max_iters=1000)
     i=0
     succs = 0
     while sign(endt-startt) * (t - endt) <= 1e-3 # && i <= max_iters
-        #println("pred")
         dx, dt = predict(system, jac_l, jac_x, x, t, dx, dt)
-        #println("corr")
         x, t, nds = correct(system, jac_l, jac_x, x, t, dx, dt, ds)
-        #println(".")
         if nds == ds
    #         print(".")
             succs += 1

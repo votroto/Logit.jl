@@ -118,8 +118,6 @@ function H(mu, lambda, ubar, i, j)
     mu[i][j] - lambda*(ubar[i][j] - ubar[i][end])
 end
 
-
-
 function H(x, lambda, u)
     mu = splitviews(x, size(first(u)) .- 1)
     pi = point_to_strat.(mu)
@@ -170,7 +168,8 @@ function unilateral_derivatives!(
     payoffs::NTuple{N,Array{F,N}},
     x::NTuple{N,Vector{F}}
 ) where {N,F}
-
+    # result[p][q] holds:
+    # ∂ū_p[j] / ∂π_q[m]
     @inbounds @fastmath for i in CartesianIndices(first(payoffs))
         # 1. Hoist probability lookups into a CPU-register tuple.
         # Val(N) forces the compiler to completely unroll this step.
@@ -211,9 +210,6 @@ function jac_x(x, lam, u::NTuple{N}, system) where {N}
 
     dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
     unilateral_derivatives!(dudpi, u, pi)
-
-    # result[p][q] holds:
-    # ∂ū_p[j] / ∂π_q[m]
 
     ij = 1
 
@@ -284,15 +280,18 @@ guess_reduced = [
 #hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
 x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
 
-@time x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
 
+#Profile.clear()
+#@profile x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
+
+#=
 mu = splitviews(x1, size(As[1]) .- 1)
 pi = point_to_strat.(mu)
 
 println(round.(pi[1]; digits=5))
 println(round.(pi[2]; digits=5))
 nothing
-
+=#
 
 
 #=
