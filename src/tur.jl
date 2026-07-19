@@ -163,36 +163,37 @@ function strat_to_point(y)
     x
 end
 
+#=
+That is a substantial gain for such a targeted change. Removing those branch mispredictions allows the CPU to actually keep its instruction pipelines full, which is likely where that 30% improvement came from.Since you've hit the efficiency wall for the explicit Jacobian approach, you now have a very clear choice for how to proceed if you need to scale beyond your current $5^5$ configuration. The logic you have now—calculating the multilinear payoff derivatives $O(N^2 A^N)$—is essentially brute-force variable elimination.If you move to $N=6$ or higher, the $A^N$ term will cause the runtime to explode. To go further, you would need to use Sequential Tensor Contraction. This is the formal way to evaluate those derivatives without ever iterating over the full joint space. Instead of iterating over all joint outcomes ($i$), you treat the payoff tensor as a sum of products and contract one dimension at a time. This reduces the complexity of computing the directional derivatives from $O(N^2 A^N)$ to $O(N^2 \cdot N \cdot A^2)$, which is polynomial in the number of actions.Since your current algorithm is now performing well for your specific needs, I will leave you with a single, highly effective suggestion for your next bottleneck: Loop Tiling.If you ever see the runtime jump again, check your memory access patterns. With your current unilateral_derivatives!, you are hitting payoffs[p][i] across a massive multidimensional array. When $N$ increases, your cache miss rate will skyrocket because i jumps across very distant memory addresses.Would you like me to show you how to structure a tiled or cache-aware version of this loop to maintain that speed as you increase the number of players, or are you satisfied with the current performance for now?
+=#
 function unilateral_derivatives!(
     result::NTuple{N,NTuple{N,Matrix{F}}},
     payoffs::NTuple{N,Array{F,N}},
-    x::NTuple{N,Vector{F}}
+    pi::NTuple{N,Vector{F}}
 ) where {N,F}
-    # result[p][q] holds:
-    # ∂ū_p[j] / ∂π_q[m]
+
+    # result[p][q] holds: ∂ū_p[j] / ∂π_q[m]
     @inbounds @fastmath for i in CartesianIndices(first(payoffs))
-        # 1. Hoist probability lookups into a CPU-register tuple.
-        # Val(N) forces the compiler to completely unroll this step.
-        probs = ntuple(z -> x[z][i[z]], Val(N))
+        # 1. Hoist probability lookups
+        probs = ntuple(z -> pi[z][i[z]], Val(N))
 
         for p in 1:N
-            # 2. Hoist the payoff lookup out of the `q` loop
             pay_p = payoffs[p][i]
+            ip = i[p] # hoist indexing
 
             for q in 1:N
                 p == q && continue
+                iq = i[q] # hoist indexing
 
+                # 2. Branch-free multilinear product
                 w_deriv = one(F)
                 for z in 1:N
-                    # 3. Because N is a static type parameter, the Julia
-                    # compiler will unroll this loop and evaluate this branch
-                    # at compile time, eliminating branching overhead entirely.
-                    if z != p && z != q
-                        w_deriv *= probs[z]
-                    end
+                    # If z is p or q, multiply by 1.0. Otherwise, multiply by the probability.
+                    # This compiles to a highly efficient conditional move instruction.
+                    w_deriv *= ifelse((z == p) | (z == q), one(F), probs[z])
                 end
 
-                result[p][q][i[p], i[q]] += w_deriv * pay_p
+                result[p][q][ip, iq] += w_deriv * pay_p
             end
         end
     end
@@ -277,8 +278,8 @@ guess_reduced = [
     strat_to_point(normalize(ones(size(As[1], 5)), 1));
 ]
 
-#hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
-x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
+hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
+@time x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
 
 
 #Profile.clear()
