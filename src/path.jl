@@ -1,9 +1,9 @@
 include("turocy.jl")
 using LinearAlgebra
 
-function predict(system, jac_l, jac_x, x::Vector{Float64}, t::Float64, lastdx::Vector{Float64}, lastdt::Float64, utils)
-    hx = jac_x(x, t, utils)
-    ht = jac_l(x, t, utils)
+function predict(x::Vector{Float64}, t::Float64, lastdx::Vector{Float64}, lastdt::Float64, utils)
+    hx = jacobian_x(x, t, utils)
+    ht = jacobian_l(x, t, utils)
 
     dxdt = (hx \ ht)
 
@@ -18,29 +18,29 @@ function predict(system, jac_l, jac_x, x::Vector{Float64}, t::Float64, lastdx::V
     return dxds, dtds
 end
 
-function correct(system, jac_l, jac_x, xlast::Vector{Float64}, tlast::Float64, dx::Vector{Float64}, dt::Float64, ds::Float64, utils; iters::Int=3, abs_tol::Float64=1e-6, rel_tol::Float64=1e-12)
+function correct(xlast::Vector{Float64}, tlast::Float64, dx::Vector{Float64}, dt::Float64, ds::Float64, utils; iters::Int=3, abs_tol::Float64=1e-6, rel_tol::Float64=1e-12)
     xpred, tpred = xlast + ds * dx, tlast + ds * dt
     x, t = xpred, tpred
 
     i = 0
     while true
-        r_sys = system(x, t, utils)
+        r_sys = residual(x, t, utils)
         r_con = dot(x - xpred, dx) + (t - tpred) * dt
 
         # 1. Absolute residual check
         if dot(r_sys, r_sys) + r_con ^ 2 < abs_tol^2
             return x, t, ds
         elseif i >= iters
-           # println("decel")
+            # println("decel")
             if ds >= 1e-4
-                return correct(system, jac_l, jac_x, xlast, tlast, dx, dt, ds * 0.5, utils; iters=iters, abs_tol=abs_tol, rel_tol=rel_tol)
+                return correct(xlast, tlast, dx, dt, ds * 0.5, utils; iters=iters, abs_tol=abs_tol, rel_tol=rel_tol)
             else
                 error("can't follow path: step size too small")
             end
         end
 
-        Fx = jac_x(x, t, utils)
-        Ft = jac_l(x, t, utils)
+        Fx = jacobian_x(x, t, utils)
+        Ft = jacobian_l(x, t, utils)
 
         v = similar(Ft)
         w = similar(r_sys)
@@ -71,22 +71,20 @@ function correct(system, jac_l, jac_x, xlast::Vector{Float64}, tlast::Float64, d
     return x, t, ds
 end
 
-function hc(startx, startt, endt, system, jac_l, jac_x, utils; max_iters=1000)
-    x = startx
-    t = startt
-    dx = zero(startx)
-    dt = sign(endt - startt)
+function hc(utils; max_iters=1000, init_x=uniform_xprofile(utils), init_t=0.0, end_t=1e6)
+    x = init_x
+    t = init_t
+    dx = zero(init_x)
+    dt = one(init_t)
     ds = 0.01
-    i=0
+    i = 0
     succs = 0
-    while sign(endt-startt) * (t - endt) <= 1e-3 # && i <= max_iters
-        dx, dt = predict(system, jac_l, jac_x, x, t, dx, dt, utils)
-        x, t, nds = correct(system, jac_l, jac_x, x, t, dx, dt, ds, utils)
+    while t <= end_t && i <= max_iters
+        dx, dt = predict(x, t, dx, dt, utils)
+        x, t, nds = correct(x, t, dx, dt, ds, utils)
         if nds == ds
-   #         print(".")
             succs += 1
         else
-         #   @show x, t, nds
             succs = 0
             ds = nds
         end
@@ -97,24 +95,6 @@ function hc(startx, startt, endt, system, jac_l, jac_x, utils; max_iters=1000)
 
         i+=1
     end
-    @show i
 
     return x
 end
-
-#=
-P = 0.1
-T = 0.5
-
-f(v) = (P .+ 3/(v .^ 2)) .* (v .- 1/3) .- T*8/3
-g(v) = P*v .- T*8/3
-
-H(v, lam) = lam*f(v[1])+(1-lam)*g(v[1])
-
-guess = 8/3*T/P
-
-x1, xs1, ts1 = hc(guess, 0.0, 2.0, H)
-
-scatterplot(xs1, ts1, xlabel="x", ylabel="t")=#
-
-

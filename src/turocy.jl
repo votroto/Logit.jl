@@ -100,7 +100,7 @@ end
 
 
 
-function jac_l(x, lam, u)
+function jacobian_l(x, lam, u)
     mu = splitviews(x, size(first(u)) .- 1)
     pi = point_to_strat.(mu)
 
@@ -111,17 +111,17 @@ function jac_l(x, lam, u)
          for a in eachindex(mu[p])]
 end
 
-function H(mu, lambda, ubar, i, j)
+function residual(mu, lambda, ubar, i, j)
     mu[i][j] - lambda*(ubar[i][j] - ubar[i][end])
 end
 
-function H(x, lambda, u)
+function residual(x, lambda, u)
     mu = splitviews(x, size(first(u)) .- 1)
     pi = point_to_strat.(mu)
 
     ubar = unilateral_deviations_simple(u, pi)
 
-    [H(mu, lambda, ubar, p, a)
+    [residual(mu, lambda, ubar, p, a)
      for p in eachindex(u)
      for a in eachindex(mu[p])]
 end
@@ -295,7 +295,7 @@ Resolves cache thrashing by pulling p and q out, and hoists probability products
     return Expr(:block, exprs...)
 end
 
-function jac_x(x, lam, u::NTuple{N}) where {N}
+function jacobian_x(x, lam, u::NTuple{N}) where {N}
     # fw = ForwardDiff.jacobian(x -> system(x, lam), x)
 
     # d F_ij / d mu_lk
@@ -348,4 +348,10 @@ function jac_x(x, lam, u::NTuple{N}) where {N}
 
 
     J
+end
+
+
+function uniform_xprofile(Us)
+    nx = sum(size(Us[i], i) - 1 for i in eachindex(Us))
+    zeros(nx)
 end
