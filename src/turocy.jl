@@ -79,85 +79,69 @@ under the mixed strategy profile `pi` without any heap allocations.
     return Expr(:block, exprs...)
 end
 
-
-
-
-
-function unilateral_deviations_simple(
-    payoffs::NTuple{N,<:AbstractArray{F,N}},
-    x::NTuple{N,<:AbstractVector{F}}
-) where {N,F}
-    result = ntuple(i -> zeros(F, size(payoffs[i], i)), Val(N))
-    unilateral_deviations!(result, payoffs, x)
-    #for i in CartesianIndices(first(payoffs))
-    #    @simd for p in 1:N
-    #        @inbounds w = prod(x[z][i[z]] for z in 1:N if z != p)
-    #        @inbounds result[p][i[p]] += (w) * payoffs[p][i]
-    #    end
-    #end
-    result
-end
-
-
-
-function jacobian_l(x, lam, u)
+function jacobian_l!(ubar, J, x, lam, u)
     mu = splitviews(x, size(first(u)) .- 1)
     pi = point_to_strat.(mu)
 
-    ubar = unilateral_deviations_simple(u, pi)
+    unilateral_deviations!(ubar, u, pi)
 
-    J = [ubar[p][end] - ubar[p][a]
-         for p in eachindex(u)
-         for a in eachindex(mu[p])]
+    idx = 1
+    for p in eachindex(u)
+        for a in eachindex(mu[p])
+            J[idx] = ubar[p][end] - ubar[p][a]
+            idx += 1
+        end
+    end
+    J
+end
+
+function jacobian_l(
+    x::Vector{F},
+    lam::F,
+    u::NTuple{N,Array{F,N}}
+) where {F,N}
+    mu = splitviews(x, size(first(u)) .- 1)
+    pi = point_to_strat.(mu)
+
+    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
+    J = Vector{eltype(x)}(undef, rsize)
+
+    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
+
+    jacobian_l!(ubar, J, x, lam, u)
+    J
 end
 
 function residual(mu, lambda, ubar, i, j)
     mu[i][j] - lambda*(ubar[i][j] - ubar[i][end])
 end
 
-function residual(x, lambda, u)
+function residual!(out, ubar, x, lambda, u)
     mu = splitviews(x, size(first(u)) .- 1)
     pi = point_to_strat.(mu)
 
-    ubar = unilateral_deviations_simple(u, pi)
+    unilateral_deviations!(ubar, u, pi)
 
-    [residual(mu, lambda, ubar, p, a)
-     for p in eachindex(u)
-     for a in eachindex(mu[p])]
-end
-
-function splitviews(x::AbstractVector, js::NTuple{N,Int}) where {N}
-    offs = cumsum((0, js...))
-    ntuple(i -> @view(x[(offs[i]+1):offs[i+1]]), N)
-end
-
-function point_to_strat(x)
-    T = eltype(x)
-
-    c = max(zero(T), maximum(x))
-
-    ex = exp.(x .- c)
-    ref = exp(-c)
-
-    denom = ref + sum(ex)
-
-    y = similar(x, length(x)+1)
-
-    @inbounds for i in eachindex(x)
-        y[i] = ex[i] / denom
+    idx = 1
+    for p in eachindex(u)
+        for a in eachindex(mu[p])
+            out[idx] = residual(mu, lambda, ubar, p, a)
+            idx += 1
+        end
     end
-
-    y[end] = ref / denom
-
-    return y
+    out
 end
 
-function strat_to_point(y)
-    x = Vector{eltype(y)}(undef, length(y)-1)
-    for i in eachindex(x)
-        x[i] = log(y[i] / y[end])
-    end
-    x
+function residual(
+    x::Vector{F},
+    lam::F,
+    u::NTuple{N,Array{F,N}}
+) where {F,N}
+    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
+    out = Vector{eltype(x)}(undef, rsize)
+    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
+
+    residual!(out, ubar, x, lam, u)
 end
 
 # Helper function to generate nested loops and hoist probabilities for derivatives

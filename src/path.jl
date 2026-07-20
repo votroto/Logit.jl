@@ -1,4 +1,5 @@
 include("turocy.jl")
+include("spaces.jl")
 using LinearAlgebra
 
 function predict(x::Vector{Float64}, t::Float64, lastdx::Vector{Float64}, lastdt::Float64, utils)
@@ -82,6 +83,7 @@ function hc(utils; max_iters=1000, init_x=uniform_xprofile(utils), init_t=0.0, e
     while t <= end_t && i <= max_iters
         dx, dt = predict(x, t, dx, dt, utils)
         x, t, nds = correct(x, t, dx, dt, ds, utils)
+
         if nds == ds
             succs += 1
         else
