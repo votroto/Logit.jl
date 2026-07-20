@@ -5,256 +5,6 @@ using BenchmarkTools
 
 
 
-# Helper function to recursively generate the nested loops at compile-time.
-# It nests loops such that the smallest index is innermost to preserve
-# column-major memory access, while hoisting intermediate probability multiplications.
-function build_loops(i, dims, idx, prev_p, N)
-    d = dims[idx]
-    var_ad = Symbol("a", d)
-
-    if idx == length(dims)
-        # Innermost loop
-        u_args = [Symbol("a", k) for k in 1:N]
-        u_idx = Expr(:ref, :U_i, u_args...)
-        p_term = prev_p == :one ? :(pi[$d][$var_ad]) : :(pi[$d][$var_ad] * $prev_p)
-
-        body = quote
-            s += $u_idx * $p_term
-        end
-
-        return quote
-            @simd for $var_ad in 1:size(U_i, $d)
-                $body
-            end
-        end
-    else
-        new_p = Symbol("p", d)
-        p_expr = prev_p == :one ? :(pi[$d][$var_ad]) : :($prev_p * pi[$d][$var_ad])
-        inner_loop = build_loops(i, dims, idx + 1, new_p, N)
-
-        return quote
-            for $var_ad in 1:size(U_i, $d)
-                $new_p = $p_expr
-                $inner_loop
-            end
-        end
-    end
-end
-
-"""
-    unilateral_deviations!(out, U, pi)
-
-Computes the expected utility for each player `i` and each pure action `j`
-under the mixed strategy profile `pi` without any heap allocations.
-"""
-@generated function unilateral_deviations!(
-    out::NTuple{N,Vector{T}},
-    U::NTuple{N,Array{T,N}},
-    pi::NTuple{N,Vector{T}}
-) where {N,T}
-    if N == 1
-        return quote
-            @inbounds for a1 in 1:size(U[1], 1)
-                out[1][a1] = U[1][a1]
-            end
-        end
-    end
-
-    exprs = []
-    for i in 1:N
-        # We loop over dimensions in descending order of memory access (N down to 1)
-        # excluding the player's own dimension `i`, which is handled by the outermost loop.
-        dims = filter(k -> k != i, N:-1:1)
-        var_ai = Symbol("a", i)
-
-        inner_loops_expr = build_loops(i, dims, 1, :one, N)
-
-        push!(exprs, quote
-            out_i = out[$i]
-            U_i = U[$i]
-            fill!(out_i, zero(T))
-            @inbounds for $var_ai in 1:size(U_i, $i)
-                s = zero(T)
-                $inner_loops_expr
-                out_i[$var_ai] = s
-            end
-        end)
-    end
-
-    return Expr(:block, exprs...)
-end
-
-
-
-
-function jac_l(x, lam, u, system)
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
-
-    ubar = unilateral_deviations_simple(u, pi)
-
-    J = [ubar[p][end] - ubar[p][a]
-         for p in eachindex(u)
-         for a in eachindex(mu[p])]
-end
-
-
-function unilateral_deviations_simple(
-    payoffs::NTuple{N,<:AbstractArray{F,N}},
-    x::NTuple{N,<:AbstractVector{F}}
-) where {N,F}
-    result = ntuple(i -> zeros(F, size(payoffs[i], i)), Val(N))
-    unilateral_deviations!(result, payoffs, x)
-    #for i in CartesianIndices(first(payoffs))
-    #    @simd for p in 1:N
-    #        @inbounds w = prod(x[z][i[z]] for z in 1:N if z != p)
-    #        @inbounds result[p][i[p]] += (w) * payoffs[p][i]
-    #    end
-    #end
-    result
-end
-
-function H(mu, lambda, ubar, i, j)
-    mu[i][j] - lambda*(ubar[i][j] - ubar[i][end])
-end
-
-function H(x, lambda, u)
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
-
-    ubar = unilateral_deviations_simple(u, pi)
-
-    [H(mu, lambda, ubar, p, a)
-     for p in eachindex(u)
-     for a in eachindex(mu[p])]
-end
-
-function splitviews(x::AbstractVector, js::NTuple{N,Int}) where {N}
-    offs = cumsum((0, js...))
-    ntuple(i -> @view(x[(offs[i]+1):offs[i+1]]), N)
-end
-
-function point_to_strat(x)
-    T = eltype(x)
-
-    c = max(zero(T), maximum(x))
-
-    ex = exp.(x .- c)
-    ref = exp(-c)
-
-    denom = ref + sum(ex)
-
-    y = similar(x, length(x)+1)
-
-    @inbounds for i in eachindex(x)
-        y[i] = ex[i] / denom
-    end
-
-    y[end] = ref / denom
-
-    return y
-end
-
-function strat_to_point(y)
-    x = Vector{eltype(y)}(undef, length(y)-1)
-    for i in eachindex(x)
-        x[i] = log(y[i] / y[end])
-    end
-    x
-end
-
-#=
-That is a substantial gain for such a targeted change. Removing those branch mispredictions allows the CPU to actually keep its instruction pipelines full, which is likely where that 30% improvement came from.Since you've hit the efficiency wall for the explicit Jacobian approach, you now have a very clear choice for how to proceed if you need to scale beyond your current $5^5$ configuration. The logic you have now—calculating the multilinear payoff derivatives $O(N^2 A^N)$—is essentially brute-force variable elimination.If you move to $N=6$ or higher, the $A^N$ term will cause the runtime to explode. To go further, you would need to use Sequential Tensor Contraction. This is the formal way to evaluate those derivatives without ever iterating over the full joint space. Instead of iterating over all joint outcomes ($i$), you treat the payoff tensor as a sum of products and contract one dimension at a time. This reduces the complexity of computing the directional derivatives from $O(N^2 A^N)$ to $O(N^2 \cdot N \cdot A^2)$, which is polynomial in the number of actions.Since your current algorithm is now performing well for your specific needs, I will leave you with a single, highly effective suggestion for your next bottleneck: Loop Tiling.If you ever see the runtime jump again, check your memory access patterns. With your current unilateral_derivatives!, you are hitting payoffs[p][i] across a massive multidimensional array. When $N$ increases, your cache miss rate will skyrocket because i jumps across very distant memory addresses.Would you like me to show you how to structure a tiled or cache-aware version of this loop to maintain that speed as you increase the number of players, or are you satisfied with the current performance for now?
-=#
-function unilateral_derivatives!(
-    result::NTuple{N,NTuple{N,Matrix{F}}},
-    payoffs::NTuple{N,Array{F,N}},
-    pi::NTuple{N,Vector{F}}
-) where {N,F}
-
-    # result[p][q] holds: ∂ū_p[j] / ∂π_q[m]
-    @inbounds @fastmath for i in CartesianIndices(first(payoffs))
-        # 1. Hoist probability lookups
-        probs = ntuple(z -> pi[z][i[z]], Val(N))
-
-        for p in 1:N
-            pay_p = payoffs[p][i]
-            ip = i[p] # hoist indexing
-
-            for q in 1:N
-                p == q && continue
-                iq = i[q] # hoist indexing
-
-                # 2. Branch-free multilinear product
-                w_deriv = one(F)
-                for z in 1:N
-                    # If z is p or q, multiply by 1.0. Otherwise, multiply by the probability.
-                    # This compiles to a highly efficient conditional move instruction.
-                    w_deriv *= ifelse((z == p) | (z == q), one(F), probs[z])
-                end
-
-                result[p][q][ip, iq] += w_deriv * pay_p
-            end
-        end
-    end
-    return result
-end
-
-function jac_x(x, lam, u::NTuple{N}, system) where {N}
-    # fw = ForwardDiff.jacobian(x -> system(x, lam), x)
-
-    # d F_ij / d mu_lk
-    J = zeros(length(x), length(x))
-
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
-
-    dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
-    unilateral_derivatives!(dudpi, u, pi)
-
-    ij = 1
-
-    for i in eachindex(u)          # equation player
-        for j in eachindex(mu[i])  # equation action (reference excluded)
-
-            lm = 1
-
-            for l in eachindex(u)  # differentiation player
-
-                if l == i
-                    # Own-player block:
-                    # ∂(μ_ij - λ(u_ij-u_ref))/∂μ_il
-                    # = identity because u does not depend on own strategy
-                    for m in eachindex(mu[l])
-                        J[ij, lm] = (j == m) ? 1.0 : 0.0
-                        lm += 1
-                    end
-
-                else
-                    c = 0
-                    #dot(g, pi[l])
-                    for m in eachindex(pi[l])
-                        gm = (dudpi[i][l][j, m] - dudpi[i][l][end, m])
-                        c += gm * pi[l][m]
-                    end
-
-                    for m in eachindex(mu[l])
-                        gm = (dudpi[i][l][j, m] - dudpi[i][l][end, m])
-                        J[ij, lm] = -lam * pi[l][m] * (gm - c)
-
-                        lm += 1
-                    end
-                end
-            end
-
-            ij += 1
-        end
-    end
-
-
-    J
-end
-
 using Random
 Random.seed!(3462345634)
 
@@ -266,9 +16,7 @@ As = (
     randn(5, 5, 5, 5, 5)
 )
 
-S(x, lam) = H(x, lam, As)
-Sl(x, lam) = jac_l(x, lam, As, S)
-Sx(x, lam) = jac_x(x, lam, As, S)
+
 
 guess_reduced = [
     strat_to_point(normalize(ones(size(As[1], 1)), 1));
@@ -278,21 +26,59 @@ guess_reduced = [
     strat_to_point(normalize(ones(size(As[1], 5)), 1));
 ]
 
-hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
-@time x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
 
+@time x1 = hc(guess_reduced, 0.0, 1000000.0, H, jac_l, jac_x, As)
+
+
+#@btime x2 = hc(guess_reduced, 0.0, 1000000.0, H, jac_l, jac_x, Bs) setup=(Bs=( randn(5, 5, 5, 5, 5), randn(5, 5, 5, 5, 5), randn(5, 5, 5, 5, 5), randn(5, 5, 5, 5, 5), randn(5, 5, 5, 5, 5) ))
+
+
+mu = splitviews(x1, size(As[1]) .- 1)
+pi = point_to_strat.(mu)
+
+for p in 1:5
+println(round.(pi[p]; digits=5))
+end
+nothing
+
+#=
+
+x = [
+    strat_to_point(normalize(rand(size(As[1], 1)), 1));
+    strat_to_point(normalize(rand(size(As[1], 2)), 1));
+    strat_to_point(normalize(rand(size(As[1], 3)), 1));
+    strat_to_point(normalize(rand(size(As[1], 4)), 1));
+    strat_to_point(normalize(rand(size(As[1], 5)), 1));
+]
+
+mu = splitviews(x, size(first(As)) .- 1)
+pi = point_to_strat.(mu)
+
+
+dudpi = ntuple(p -> ntuple(q -> zeros(size(As[p], p), size(As[p], q)), 5), 5)
+unilateral_derivatives!(dudpi, As, pi)
+
+
+dudpi2 = ntuple(p -> ntuple(q -> zeros(size(As[p], p), size(As[p], q)), 5), 5)
+unilateral_derivatives2!(dudpi2, As, pi)
+
+@show norm(dudpi[2][3] - dudpi2[2][3])
+
+
+
+dudpi = ntuple(p -> ntuple(q -> zeros(size(As[p], p), size(As[p], q)), 5), 5)
+@btime unilateral_derivatives!($dudpi, $As, pi)
+
+dudpi2 = ntuple(p -> ntuple(q -> zeros(size(As[p], p), size(As[p], q)), 5), 5)
+@btime unilateral_derivatives2!($dudpi2, $As, pi)
+
+nothing
+=#
 
 #Profile.clear()
 #@profile x1 = hc(guess_reduced, 0.0, 1000000.0, S, Sl, Sx)
 
-#=
-mu = splitviews(x1, size(As[1]) .- 1)
-pi = point_to_strat.(mu)
 
-println(round.(pi[1]; digits=5))
-println(round.(pi[2]; digits=5))
-nothing
-=#
 
 
 #=
