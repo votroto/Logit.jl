@@ -1,149 +1,5 @@
 
 
-# Helper function to recursively generate the nested loops at compile-time.
-# It nests loops such that the smallest index is innermost to preserve
-# column-major memory access, while hoisting intermediate probability multiplications.
-function build_loops(i, dims, idx, prev_p, N)
-    d = dims[idx]
-    var_ad = Symbol("a", d)
-
-    if idx == length(dims)
-        # Innermost loop
-        u_args = [Symbol("a", k) for k in 1:N]
-        u_idx = Expr(:ref, :U_i, u_args...)
-        p_term = prev_p == :one ? :(pi[$d][$var_ad]) : :(pi[$d][$var_ad] * $prev_p)
-
-        body = quote
-            s += $u_idx * $p_term
-        end
-
-        return quote
-            @simd for $var_ad in 1:size(U_i, $d)
-                $body
-            end
-        end
-    else
-        new_p = Symbol("p", d)
-        p_expr = prev_p == :one ? :(pi[$d][$var_ad]) : :($prev_p * pi[$d][$var_ad])
-        inner_loop = build_loops(i, dims, idx + 1, new_p, N)
-
-        return quote
-            for $var_ad in 1:size(U_i, $d)
-                $new_p = $p_expr
-                $inner_loop
-            end
-        end
-    end
-end
-
-"""
-    unilateral_deviations!(out, U, pi)
-
-Computes the expected utility for each player `i` and each pure action `j`
-under the mixed strategy profile `pi` without any heap allocations.
-"""
-@generated function unilateral_deviations!(
-    out::NTuple{N,Vector{T}},
-    U::NTuple{N,Array{T,N}},
-    pi::NTuple{N,Vector{T}}
-) where {N,T}
-    if N == 1
-        return quote
-            @inbounds for a1 in 1:size(U[1], 1)
-                out[1][a1] = U[1][a1]
-            end
-        end
-    end
-
-    exprs = []
-    for i in 1:N
-        # We loop over dimensions in descending order of memory access (N down to 1)
-        # excluding the player's own dimension `i`, which is handled by the outermost loop.
-        dims = filter(k -> k != i, N:-1:1)
-        var_ai = Symbol("a", i)
-
-        inner_loops_expr = build_loops(i, dims, 1, :one, N)
-
-        push!(exprs, quote
-            out_i = out[$i]
-            U_i = U[$i]
-            fill!(out_i, zero(T))
-            @inbounds for $var_ai in 1:size(U_i, $i)
-                s = zero(T)
-                $inner_loops_expr
-                out_i[$var_ai] = s
-            end
-        end)
-    end
-
-    return Expr(:block, exprs...)
-end
-
-function jacobian_l!(ubar, J, x, lam, u)
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
-
-    unilateral_deviations!(ubar, u, pi)
-
-    idx = 1
-    for p in eachindex(u)
-        for a in eachindex(mu[p])
-            J[idx] = ubar[p][end] - ubar[p][a]
-            idx += 1
-        end
-    end
-    J
-end
-
-function jacobian_l(
-    x::Vector{F},
-    lam::F,
-    u::NTuple{N,Array{F,N}}
-) where {F,N}
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
-
-    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
-    J = Vector{eltype(x)}(undef, rsize)
-
-    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
-
-    jacobian_l!(ubar, J, x, lam, u)
-    J
-end
-
-function residual(mu, lambda, ubar, i, j)
-    mu[i][j] - lambda*(ubar[i][j] - ubar[i][end])
-end
-
-function residual!(out, ubar, x, lambda, u)
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
-
-    unilateral_deviations!(ubar, u, pi)
-
-    idx = 1
-    for p in eachindex(u)
-        for a in eachindex(mu[p])
-            out[idx] = residual(mu, lambda, ubar, p, a)
-            idx += 1
-        end
-    end
-    out
-end
-
-function residual(
-    x::Vector{F},
-    lam::F,
-    u::NTuple{N,Array{F,N}}
-) where {F,N}
-    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
-    out = Vector{eltype(x)}(undef, rsize)
-    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
-
-    residual!(out, ubar, x, lam, u)
-end
-
 # Helper function to generate nested loops and hoist probabilities for derivatives
 function build_deriv_loops(dims, idx, prev_p, p, q, N)
     d = dims[idx]
@@ -234,20 +90,148 @@ end
     return Expr(:block, exprs...)
 end
 
-function jacobian_x(x, lam, u::NTuple{N}) where {N}
-    # d F_ij / d mu_lk
-    J = zeros(length(x), length(x))
+# Helper function to recursively generate the nested loops at compile-time.
+# It nests loops such that the smallest index is innermost to preserve
+# column-major memory access, while hoisting intermediate probability multiplications.
+function build_loops(i, dims, idx, prev_p, N)
+    d = dims[idx]
+    var_ad = Symbol("a", d)
+
+    if idx == length(dims)
+        # Innermost loop
+        u_args = [Symbol("a", k) for k in 1:N]
+        u_idx = Expr(:ref, :U_i, u_args...)
+        p_term = prev_p == :one ? :(pi[$d][$var_ad]) : :(pi[$d][$var_ad] * $prev_p)
+
+        body = quote
+            s += $u_idx * $p_term
+        end
+
+        return quote
+            @simd for $var_ad in 1:size(U_i, $d)
+                $body
+            end
+        end
+    else
+        new_p = Symbol("p", d)
+        p_expr = prev_p == :one ? :(pi[$d][$var_ad]) : :($prev_p * pi[$d][$var_ad])
+        inner_loop = build_loops(i, dims, idx + 1, new_p, N)
+
+        return quote
+            for $var_ad in 1:size(U_i, $d)
+                $new_p = $p_expr
+                $inner_loop
+            end
+        end
+    end
+end
+
+"""
+    unilateral_deviations!(out, U, pi)
+
+Computes the expected utility for each player `i` and each pure action `j`
+under the mixed strategy profile `pi` without any heap allocations.
+"""
+@generated function unilateral_deviations!(
+    out::NTuple{N,Vector{T}},
+    U::NTuple{N,Array{T,N}},
+    pi::NTuple{N,Vector{T}}
+) where {N,T}
+    if N == 1
+        return quote
+            @inbounds for a1 in 1:size(U[1], 1)
+                out[1][a1] = U[1][a1]
+            end
+        end
+    end
+
+    exprs = []
+    for i in 1:N
+        # We loop over dimensions in descending order of memory access (N down to 1)
+        # excluding the player's own dimension `i`, which is handled by the outermost loop.
+        dims = filter(k -> k != i, N:-1:1)
+        var_ai = Symbol("a", i)
+
+        inner_loops_expr = build_loops(i, dims, 1, :one, N)
+
+        push!(exprs, quote
+            out_i = out[$i]
+            U_i = U[$i]
+            fill!(out_i, zero(T))
+            @inbounds for $var_ai in 1:size(U_i, $i)
+                s = zero(T)
+                $inner_loops_expr
+                out_i[$var_ai] = s
+            end
+        end)
+    end
+
+    return Expr(:block, exprs...)
+end
+
+function jacobian_l!(J, ubar, mu, lam, u)
+    idx = 1
+    for p in eachindex(u)
+        for a in eachindex(mu[p])
+            J[idx] = ubar[p][end] - ubar[p][a]
+            idx += 1
+        end
+    end
+    J
+end
+
+function jacobian_l(
+    x::Vector{F},
+    lam::F,
+    u::NTuple{N,Array{F,N}}
+) where {F,N}
+    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
+    J = Vector{eltype(x)}(undef, rsize)
 
     mu = splitviews(x, size(first(u)) .- 1)
     pi = point_to_strat.(mu)
 
-    dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
-    unilateral_derivatives!(dudpi, u, pi)
+    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
+    unilateral_deviations!(ubar, u, pi)
 
+    jacobian_l!(J, ubar, mu, lam, u)
+    J
+end
+
+function residual!(out, mu, ubar, x, lambda, u)
+    idx = 1
+    for p in eachindex(u)
+        for a in eachindex(mu[p])
+            out[idx] = mu[p][a] - lambda*(ubar[p][a] - ubar[p][end])
+            idx += 1
+        end
+    end
+    out
+end
+
+function residual(
+    x::Vector{F},
+    lam::F,
+    u::NTuple{N,Array{F,N}}
+) where {F,N}
+    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
+    out = Vector{eltype(x)}(undef, rsize)
+    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
+
+    mu = splitviews(x, size(first(u)) .- 1)
+    pi = point_to_strat.(mu)
+
+    unilateral_deviations!(ubar, u, pi)
+
+    residual!(out, mu, ubar, x, lam, u)
+end
+
+
+function jacobian_x!(J, pi, lam, dudpi, u::NTuple{N}) where {N}
     ij = 1
 
-    for i in eachindex(u)          # equation player
-        for j in eachindex(mu[i])  # equation action (reference excluded)
+    for i in eachindex(u)           # equation player
+        for j in 1:(size(u[i], i)-1) # equation action (reference excluded)
 
             lm = 1
 
@@ -257,7 +241,7 @@ function jacobian_x(x, lam, u::NTuple{N}) where {N}
                     # Own-player block:
                     # ∂(μ_ij - λ(u_ij-u_ref))/∂μ_il
                     # = identity because u does not depend on own strategy
-                    for m in eachindex(mu[l])
+                    for m in 1:(size(u[i], i)-1)
                         J[ij, lm] = (j == m) ? 1.0 : 0.0
                         lm += 1
                     end
@@ -270,7 +254,7 @@ function jacobian_x(x, lam, u::NTuple{N}) where {N}
                         c += gm * pi[l][m]
                     end
 
-                    for m in eachindex(mu[l])
+                    for m in 1:(size(u[i], i)-1)
                         gm = (dudpi[i][l][j, m] - dudpi[i][l][end, m])
                         J[ij, lm] = -lam * pi[l][m] * (gm - c)
 
@@ -283,6 +267,20 @@ function jacobian_x(x, lam, u::NTuple{N}) where {N}
         end
     end
 
+    J
+end
+
+function jacobian_x(x, lam, u::NTuple{N}) where {N}
+    # d F_ij / d mu_lk
+    J = zeros(length(x), length(x))
+
+    mu = splitviews(x, size(first(u)) .- 1)
+    pi = point_to_strat.(mu)
+
+    dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
+    unilateral_derivatives!(dudpi, u, pi)
+
+    jacobian_x!(J, pi, lam, dudpi, u)
     J
 end
 

@@ -2,7 +2,12 @@ include("turocy.jl")
 include("spaces.jl")
 using LinearAlgebra
 
-function predict(x::Vector{Float64}, t::Float64, lastdx::Vector{Float64}, lastdt::Float64, utils)
+function predict(
+    x::Vector{Float64},
+    t::Float64,
+    lastdx::Vector{Float64},
+    lastdt::Float64, utils
+)
     hx = jacobian_x(x, t, utils)
     ht = jacobian_l(x, t, utils)
 
@@ -19,7 +24,17 @@ function predict(x::Vector{Float64}, t::Float64, lastdx::Vector{Float64}, lastdt
     return dxds, dtds
 end
 
-function correct(xlast::Vector{Float64}, tlast::Float64, dx::Vector{Float64}, dt::Float64, ds::Float64, utils; iters::Int=3, abs_tol::Float64=1e-6, rel_tol::Float64=1e-12)
+function correct(
+    xlast::Vector{Float64},
+    tlast::Float64,
+    dx::Vector{Float64},
+    dt::Float64,
+    ds::Float64,
+    utils;
+    iters::Int=3,
+    abs_tol::Float64=1e-6,
+    rel_tol::Float64=1e-12
+)
     xpred, tpred = xlast + ds * dx, tlast + ds * dt
     x, t = xpred, tpred
 
@@ -32,11 +47,10 @@ function correct(xlast::Vector{Float64}, tlast::Float64, dx::Vector{Float64}, dt
         if dot(r_sys, r_sys) + r_con ^ 2 < abs_tol^2
             return x, t, ds
         elseif i >= iters
-            # println("decel")
             if ds >= 1e-4
                 return correct(xlast, tlast, dx, dt, ds * 0.5, utils; iters=iters, abs_tol=abs_tol, rel_tol=rel_tol)
             else
-                error("can't follow path: step size too small")
+                error("Progress along path stalled!")
             end
         end
 
@@ -54,8 +68,7 @@ function correct(xlast::Vector{Float64}, tlast::Float64, dx::Vector{Float64}, dt
         dt_step = (-r_con - dot(dx, w)) / (dt - dot(dx, v))
         dx_step = w - dt_step * v
 
-        # 2. Relative step size check (NEW)
-        # If the step we are about to take is smaller than Float64 noise at this scale,
+        # 2. Relative step size check (smaller than Float64 noise)
         # we have converged as far as the hardware allows.
         step_norm = sqrt(dot(dx_step, dx_step) + dt_step^2)
         val_norm = sqrt(dot(x, x) + t^2)
