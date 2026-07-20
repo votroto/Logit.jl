@@ -6,10 +6,30 @@ function predict(
     x::Vector{Float64},
     t::Float64,
     lastdx::Vector{Float64},
-    lastdt::Float64, utils
-)
-    hx = jacobian_x(x, t, utils)
-    ht = jacobian_l(x, t, utils)
+    lastdt::Float64,
+    utils::NTuple{N}
+) where {N}
+    u = utils
+    lam = t
+    hx = zeros(length(x), length(x))
+
+    mu = splitviews(x, size(first(u)) .- 1)
+    pi = point_to_strat.(mu)
+
+    dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
+    unilateral_derivatives!(dudpi, u, pi)
+
+    jacobian_x!(hx, pi, lam, dudpi, u)
+
+
+
+    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
+    ht = Vector{eltype(x)}(undef, rsize)
+
+    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
+    unilateral_deviations!(ubar, u, pi)
+
+    jacobian_l!(ht, ubar, mu, lam, u)
 
     dxdt = (hx \ ht)
 
@@ -30,21 +50,33 @@ function correct(
     dx::Vector{Float64},
     dt::Float64,
     ds::Float64,
-    utils;
+    utils::NTuple{N};
     iters::Int=3,
     abs_tol::Float64=1e-6,
     rel_tol::Float64=1e-12
-)
+) where {N}
     xpred, tpred = xlast + ds * dx, tlast + ds * dt
     x, t = xpred, tpred
 
     i = 0
     while true
-        r_sys = residual(x, t, utils)
+        rsize = sum(size(first(utils), i) - 1 for i in eachindex(utils))
+        res = Vector{eltype(x)}(undef, rsize)
+        ubar = ntuple(i -> zeros(eltype(x), size(utils[i], i)), Val(N))
+
+        mu = splitviews(x, size(first(utils)) .- 1)
+        pi = point_to_strat.(mu)
+
+        unilateral_deviations!(ubar, utils, pi)
+
+        residual!(res, mu, ubar, x, t, utils)
+
+
+
         r_con = dot(x - xpred, dx) + (t - tpred) * dt
 
         # 1. Absolute residual check
-        if dot(r_sys, r_sys) + r_con ^ 2 < abs_tol^2
+        if dot(res, res) + r_con ^ 2 < abs_tol^2
             return x, t, ds
         elseif i >= iters
             if ds >= 1e-4
@@ -54,16 +86,25 @@ function correct(
             end
         end
 
-        Fx = jacobian_x(x, t, utils)
-        Ft = jacobian_l(x, t, utils)
+
+        Fx = zeros(length(x), length(x))
+        dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(utils[p], p), size(utils[p], q)), N), N)
+        unilateral_derivatives!(dudpi, utils, pi)
+        jacobian_x!(Fx, pi, t, dudpi, utils)
+
+
+
+        Ft = Vector{eltype(x)}(undef, rsize)
+        jacobian_l!(Ft, ubar, mu, t, utils)
+
 
         v = similar(Ft)
-        w = similar(r_sys)
-        @. r_sys = -r_sys
+        w = similar(res)
+        @. res = -res
 
         lu_res = lu!(Fx)
         ldiv!(v, lu_res, Ft)
-        ldiv!(w, lu_res, r_sys)
+        ldiv!(w, lu_res, res)
 
         dt_step = (-r_con - dot(dx, w)) / (dt - dot(dx, v))
         dx_step = w - dt_step * v

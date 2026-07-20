@@ -211,19 +211,19 @@ end
 
 function residual(
     x::Vector{F},
-    lam::F,
-    u::NTuple{N,Array{F,N}}
+    t::F,
+    utils::NTuple{N,Array{F,N}}
 ) where {F,N}
-    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
-    out = Vector{eltype(x)}(undef, rsize)
-    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
+    rsize = sum(size(first(utils), i) - 1 for i in eachindex(utils))
+    res = Vector{eltype(x)}(undef, rsize)
+    ubar = ntuple(i -> zeros(eltype(x), size(utils[i], i)), Val(N))
 
-    mu = splitviews(x, size(first(u)) .- 1)
+    mu = splitviews(x, size(first(utils)) .- 1)
     pi = point_to_strat.(mu)
 
-    unilateral_deviations!(ubar, u, pi)
+    unilateral_deviations!(ubar, utils, pi)
 
-    residual!(out, mu, ubar, x, lam, u)
+    residual!(res, mu, ubar, x, t, utils)
 end
 
 
