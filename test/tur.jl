@@ -1,9 +1,6 @@
 include("../src/path.jl")
 using BenchmarkTools
 
-
-
-
 using Random
 Random.seed!(3462345634)
 

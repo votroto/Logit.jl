@@ -160,43 +160,6 @@ function strat_to_point(y)
     x
 end
 
-function unilateral_derivatives!(
-    result::NTuple{N,NTuple{N,Matrix{F}}},
-    payoffs::NTuple{N,Array{F,N}},
-    pi::NTuple{N,Vector{F}}
-) where {N,F}
-
-    # result[p][q] holds: ∂ū_p[j] / ∂π_q[m]
-    @inbounds @fastmath for i in CartesianIndices(first(payoffs))
-        # 1. Hoist probability lookups
-        probs = ntuple(z -> pi[z][i[z]], Val(N))
-
-        for p in 1:N
-            pay_p = payoffs[p][i]
-            ip = i[p] # hoist indexing
-
-            for q in 1:N
-                p == q && continue
-                iq = i[q] # hoist indexing
-
-                # 2. Branch-free multilinear product
-                w_deriv = one(F)
-                for z in 1:N
-                    # If z is p or q, multiply by 1.0. Otherwise, multiply by the probability.
-                    # This compiles to a highly efficient conditional move instruction.
-                    w_deriv *= ifelse((z == p) | (z == q), one(F), probs[z])
-                end
-
-                result[p][q][ip, iq] += w_deriv * pay_p
-            end
-        end
-    end
-    return result
-end
-
-
-
-
 # Helper function to generate nested loops and hoist probabilities for derivatives
 function build_deriv_loops(dims, idx, prev_p, p, q, N)
     d = dims[idx]
@@ -258,15 +221,7 @@ function build_deriv_loops(dims, idx, prev_p, p, q, N)
     end
 end
 
-
-
-"""
-    unilateral_derivatives3!(result, payoffs, pi)
-
-Fully unrolled and hoisted derivative kernel.
-Resolves cache thrashing by pulling p and q out, and hoists probability products.
-"""
-@generated function unilateral_derivatives2!(
+@generated function unilateral_derivatives!(
     result::NTuple{N,NTuple{N,Matrix{T}}},
     payoffs::NTuple{N,Array{T,N}},
     pi::NTuple{N,Vector{T}}
@@ -296,8 +251,6 @@ Resolves cache thrashing by pulling p and q out, and hoists probability products
 end
 
 function jacobian_x(x, lam, u::NTuple{N}) where {N}
-    # fw = ForwardDiff.jacobian(x -> system(x, lam), x)
-
     # d F_ij / d mu_lk
     J = zeros(length(x), length(x))
 
@@ -305,7 +258,7 @@ function jacobian_x(x, lam, u::NTuple{N}) where {N}
     pi = point_to_strat.(mu)
 
     dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
-    unilateral_derivatives2!(dudpi, u, pi)
+    unilateral_derivatives!(dudpi, u, pi)
 
     ij = 1
 
@@ -346,10 +299,8 @@ function jacobian_x(x, lam, u::NTuple{N}) where {N}
         end
     end
 
-
     J
 end
-
 
 function uniform_xprofile(Us)
     nx = sum(size(Us[i], i) - 1 for i in eachindex(Us))
