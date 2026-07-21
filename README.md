@@ -1,48 +1,38 @@
 # Logit.jl
 
-Pure Julia implementation of logit quantal response equilibrium (QRE) solver for simultaneous strategic games.
-
-Replaces `gambit-logit -q -e -m1e-8` without any Gambit dependencies.
+Computes a Nash Equilibrium of an N-player general sum game by a continuation over a logit equilibrium.
 
 ## Usage
 
 ```julia
-using Logit
+include("../src/path.jl")
 
-# Define payoff arrays (one per player)
-A = [1.0 0.0; 3.0 2.0]  # Player 1
-B = [2.0 3.0; 0.0 1.0]  # Player 2
+using Random
+Random.seed!(3462345634)
 
-# Solve QRE with regret tolerance 1e-8
-result = solve_qre((A, B), 1e-8)
+Us = (
+    randn(5, 5, 5, 5, 5),
+    randn(5, 5, 5, 5, 5),
+    randn(5, 5, 5, 5, 5),
+    randn(5, 5, 5, 5, 5),
+    randn(5, 5, 5, 5, 5)
+)
 
-# Access results
-println("Lambda: $(result.lambda)")
-println("Player 1 mixed strategy: $(result.strategies[1])")
-println("Player 2 mixed strategy: $(result.strategies[2])")
-println("Regret: $(result.regret)")
+x1 = hc(Us)
+
+mu = splitviews(x1, size(Us[1]) .- 1)
+pi = point_to_strat.(mu)
+
+for p in eachindex(pi)
+println(round.(pi[p]; digits=5))
+end
+nothing
 ```
-
-## API
-
-```julia
-solve_qre(payoffs::NTuple{N, Array{Float64, N}}, regret_tol::Float64=1e-8) -> QREResult
+should print
 ```
-
-**Arguments:**
-- `payoffs`: Tuple of payoff arrays, one per player. For N-player game, each array is N-dimensional.
-- `regret_tol`: Regret tolerance for termination (default 1e-8)
-
-**Returns:**
-- `QREResult` with fields:
-  - `lambda::Float64`: precision parameter at terminal equilibrium
-  - `strategies::Vector{Vector{Float64}}`: mixed strategy for each player
-  - `regret::Float64`: maximum regret
-
-## Implementation
-
-Solves the system:
-- For player i, strategy j≥2: `log(pᵢⱼ) - log(pᵢ₁) = λ(uᵢⱼ - uᵢ₁)`
-- For player i: `Σⱼ pᵢⱼ = 1`
-
-Traces along the QRE path from λ=0 until maximum regret ≤ regret_tol.
+[0.21543, 0.28827, 0.26213, 0.1211, 0.11307]
+[0.0, 0.00699, 0.05883, 0.31778, 0.6164]
+[0.0, 0.0, 0.0, 0.73337, 0.26663]
+[0.32376, 0.0, 0.0, 0.34957, 0.32667]
+[0.105, 0.45382, 0.0, 0.0, 0.44118]
+```
