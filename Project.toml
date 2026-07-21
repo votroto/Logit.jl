@@ -2,3 +2,9 @@ name = "Logit"
 uuid = "56ed5f9e-c32e-46b8-b489-5928d745fddb"
 version = "0.1.1"
 authors = ["votroto <tomas.votroubek@outlook.com>"]
+
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+
+[compat]
+LinearAlgebra = "1.12.0"

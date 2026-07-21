@@ -1,5 +1,3 @@
-include("turocy.jl")
-include("spaces.jl")
 using LinearAlgebra
 using LinearAlgebra: BlasInt
 using LinearAlgebra.BLAS: @blasfunc

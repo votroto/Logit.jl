@@ -1,5 +1,4 @@
 
-
 function build_deriv_loops(dims, idx, prev_p, p, q, N)
     d = dims[idx]
     var_ad = Symbol("a", d)
