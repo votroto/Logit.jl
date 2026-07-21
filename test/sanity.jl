@@ -7,7 +7,7 @@ include("../src/path.jl")
 """Computes the values and NE strategies for a general-sum game"""
 function bilinear_program(us::NTuple{2, AbstractMatrix}, startx=normalize(ones(size(us[1],1),1)), starty=normalize(ones(size(us[2],2),1)), wstart=zeros(2); optimizer=Gurobi.Optimizer)
     m = Model(optimizer)
-    #set_silent(m)
+    set_silent(m)
     nx, ny = size(us[1])
     @variable(m, xs[i=1:nx], lower_bound=0, upper_bound=1, start=startx[i])
     @variable(m, ys[i=1:ny], lower_bound=0, upper_bound=1, start=starty[i])

@@ -12,15 +12,27 @@ Us = (
     randn(5, 5, 5, 5, 5)
 )
 
+ff(x,y)=(x-y)^2
+
 hc(Us)
 
+#A = [ff(x,y) for x in -1.0:0.5:1.0, y in -1.0:0.5:1.0]
+
+#Us = (A,-A)
 @time x1 = hc(Us)
+
+
+#A = [ff(x,y) for x in -1.0:0.2:1.0, y in -1.0:0.2:1.0]
+#
+#Us = (A,-A)
+#@time x1 = hc(Us)
+
 
 
 mu = splitviews(x1, size(Us[1]) .- 1)
 pi = point_to_strat.(mu)
 
-for p in 1:5
+for p in eachindex(pi)
 println(round.(pi[p]; digits=5))
 end
 nothing
