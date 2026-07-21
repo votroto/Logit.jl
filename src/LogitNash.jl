@@ -1,4 +1,4 @@
-module Logit
+module LogitNash
 include("spaces.jl")
 include("turocy.jl")
 include("path.jl")

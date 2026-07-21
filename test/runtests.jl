@@ -1,5 +1,5 @@
 using Test
-using Logit
+using LogitNash
 
 function e2e_guessing_game()
     util::Matrix{Float64} = [0 1 4; 1 0 1; 4 1 0]

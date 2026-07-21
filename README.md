@@ -1,11 +1,11 @@
-# Logit.jl
+# LogitNash.jl
 
 Compute an epsilon Nash equilibrium of an N-player game.
 
 ## Usage
 
 ```julia
-include("../src/path.jl")
+using LogitNash
 
 using Random
 Random.seed!(3462345634)
@@ -24,7 +24,7 @@ for p in eachindex(pi)
     println(round.(pi[p]; digits=5))
 end
 ```
-should print
+should print the strategies
 ```
 [0.21543, 0.28827, 0.26213, 0.1211, 0.11307]
 [0.0, 0.00699, 0.05883, 0.31778, 0.6164]
