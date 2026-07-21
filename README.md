@@ -1,6 +1,6 @@
 # Logit.jl
 
-Computes a Nash Equilibrium of an N-player general sum game by a continuation over a logit equilibrium.
+Compute an epsilon Nash equilibrium of an N-player game.
 
 ## Usage
 
@@ -18,15 +18,11 @@ Us = (
     randn(5, 5, 5, 5, 5)
 )
 
-x1 = hc(Us)
-
-mu = splitviews(x1, size(Us[1]) .- 1)
-pi = point_to_strat.(mu)
+pi, status = nash(Us)
 
 for p in eachindex(pi)
-println(round.(pi[p]; digits=5))
+    println(round.(pi[p]; digits=5))
 end
-nothing
 ```
 should print
 ```

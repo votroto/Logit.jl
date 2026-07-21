@@ -169,7 +169,7 @@ under the mixed strategy profile `pi` without any heap allocations.
     return Expr(:block, exprs...)
 end
 
-function jacobian_l!(J, ubar, mu, lam, u)
+function jacobian_t!(J, ubar, mu, u)
     idx = 1
     for p in eachindex(u)
         for a in eachindex(mu[p])
@@ -180,9 +180,8 @@ function jacobian_l!(J, ubar, mu, lam, u)
     J
 end
 
-function jacobian_l(
+function jacobian_t(
     x::Vector{F},
-    lam::F,
     u::NTuple{N,Array{F,N}}
 ) where {F,N}
     rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
@@ -194,7 +193,7 @@ function jacobian_l(
     ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
     unilateral_deviations!(ubar, u, pi)
 
-    jacobian_l!(J, ubar, mu, lam, u)
+    jacobian_t!(J, ubar, mu, u)
     J
 end
 

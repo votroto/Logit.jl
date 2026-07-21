@@ -5,6 +5,10 @@ using LinearAlgebra: BlasInt
 using LinearAlgebra.BLAS: @blasfunc
 using LinearAlgebra.LAPACK: liblapack
 
+function max_deviation_incentive(ubar::NTuple{N}, pi::NTuple{N}) where N
+    maximum(maximum(ubar[p]) - dot(ubar[p], pi[p]) for p in 1:N)
+end
+
 function fast_lu!(A::Matrix{Float64}, ipiv::Vector{BlasInt})
     m, n = size(A)
     info = Ref{BlasInt}()
@@ -75,7 +79,7 @@ function predict!(
     jacobian_x!(ws.Fx, ws.pi, t, ws.dudpi, utils)
 
     unilateral_deviations!(ws.ubar, utils, ws.pi)
-    jacobian_l!(ws.Ft, ws.ubar, mu, t, utils)
+    jacobian_t!(ws.Ft, ws.ubar, mu, utils)
 
     # In-place factorization and solve (0 allocations)
     fast_lu!(ws.Fx, ws.ipiv)
@@ -86,13 +90,13 @@ function predict!(
     dtds = 1.0 / sqrt(1.0 + dot(ws.dxdt, ws.dxdt))
 
     # Evaluate direction check before mutating dx_out (in case dx_out aliases lastdx)
-    sign_check = -dtds * dot(ws.dxdt, lastdx) + dtds * lastdt
+    sign_check = dtds * (lastdt - dot(ws.dxdt, lastdx))
 
     if sign_check < 0.0
-        @. dx_out = dtds * ws.dxdt
+        mul!(dx_out, dtds, ws.dxdt)
         dtds = -dtds
     else
-        @. dx_out = -dtds * ws.dxdt
+        mul!(dx_out, -dtds, ws.dxdt)
     end
 
     return dx_out, dtds
@@ -139,9 +143,9 @@ function correct!(
 
         unilateral_derivatives!(ws.dudpi, utils, ws.pi)
         jacobian_x!(ws.Fx, ws.pi, t_out, ws.dudpi, utils)
-        jacobian_l!(ws.Ft, ws.ubar, mu, t_out, utils)
+        jacobian_t!(ws.Ft, ws.ubar, mu, utils)
 
-        @. ws.res = -ws.res
+        rmul!(ws.res, -1)
 
         fast_lu!(ws.Fx, ws.ipiv)
 
@@ -175,7 +179,7 @@ function correct!(
     end
 end
 
-function validate_game(utils::NTuple{N, AbstractArray{F, N}}) where {F, N}
+function validate_game(utils::NTuple{N,AbstractArray{F,N}}) where {F,N}
     if N <= 1
         throw(ArgumentError("A normal-form game must have at least 2 players; got N = $N."))
     end
@@ -189,7 +193,17 @@ function validate_game(utils::NTuple{N, AbstractArray{F, N}}) where {F, N}
     end
 end
 
-function nash(utils::NTuple{N, AbstractArray{F, N}}; max_iters=1000, end_t=1e6) where {F, N}
+"""
+    nash(utils::NTuple{N,AbstractArray{Float64,N}}; stop_iters::Int=1000, stop_t::Float64=1e6, stop_eps::Float64=1e-6) where {N}
+
+Compute the epsilon Nash equilibrium of an N-player game by tracing a logit equilibrium path from t=0 to infinity.
+"""
+function nash(
+    utils::NTuple{N,AbstractArray{Float64,N}};
+    stop_iters::Int=1000,
+    stop_t::Float64=1e6,
+    stop_eps::Float64=1e-6
+) where {N}
     validate_game(utils)
 
     x = uniform_xprofile(utils)
@@ -199,10 +213,12 @@ function nash(utils::NTuple{N, AbstractArray{F, N}}; max_iters=1000, end_t=1e6) 
     ds = 0.01
     iteration = 0
     successes_in_row = 0
+    regret = NaN
+    stall = false
 
     ws = make_hc_workspace(x, utils)
 
-    while t <= end_t && iteration <= max_iters
+    while t <= stop_t && iteration <= stop_iters && !(regret <= stop_eps) && !stall
         dx, dt = predict!(dx, x, t, dx, dt, utils, ws)
 
         corrected = false
@@ -214,8 +230,10 @@ function nash(utils::NTuple{N, AbstractArray{F, N}}; max_iters=1000, end_t=1e6) 
             if !corrected
                 ds /= 2
                 successes_in_row = 0
-                if ds < 1e-4
-                    error("Progress along path stalled! Stepsize reduced below 1e-4.")
+                if ds <= 1e-4
+                    # Progress along path stalled!
+                    stall = true
+                    break
                 end
             else
                 copyto!(x, x_new)
@@ -230,10 +248,9 @@ function nash(utils::NTuple{N, AbstractArray{F, N}}; max_iters=1000, end_t=1e6) 
                 iteration += 1
             end
         end
+
+        regret = max_deviation_incentive(ws.ubar, ws.pi)
     end
 
-    mu = splitviews(x, size(utils[1]) .- 1)
-    pi = redlograt_to_prob.(mu)
-
-    return pi
+    return ws.pi, (; t, iteration, regret, stall)
 end

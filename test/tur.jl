@@ -19,16 +19,17 @@ nash(Us)
 #A = [ff(x,y) for x in -1.0:0.5:1.0, y in -1.0:0.5:1.0]
 
 #Us = (A,-A)
-@time pi = nash(Us)
+@time pi, status = nash(Us)
 #
-#for p in eachindex(pi)
-#    println(round.(pi[p]; digits=5))
-#end
+for p in eachindex(pi)
+    println(round.(pi[p]; digits=5))
+end
 #nothing
 
- b = [0.0 for i in 1:3, j in 1:1]
-#
-@time nash((b,b))
+# b = [0.0 for i in 1:3, j in 1:1]
+
+
+#@time nash((b,b))
 
 #=
 [0.21543, 0.28827, 0.26213, 0.1211, 0.11307]
