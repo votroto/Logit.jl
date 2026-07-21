@@ -9,16 +9,18 @@ function point_to_strat!(y, x)
 
     c = max(zero(T), maximum(x))
 
-    ex = exp.(x .- c)
-    ref = exp(-c)
-
-    denom = ref + sum(ex)
-
+    denom = 0
     @inbounds for i in eachindex(x)
-        y[i] = ex[i] / denom
+        v = exp(x[i] - c)
+        y[i] = v
+        denom += v
     end
+    y[end] = exp(-c)
+    denom += y[end]
 
-    y[end] = ref / denom
+    @inbounds for i in eachindex(y)
+        y[i] = y[i] / denom
+    end
 
     return y
 end
