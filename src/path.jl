@@ -69,7 +69,7 @@ function predict!(
     _zero_nested!(ws.dudpi)
 
     mu = splitviews(x, size(first(utils)) .- 1)
-    point_to_strat!.(ws.pi, mu)
+    redlograt_to_prob!.(ws.pi, mu)
 
     unilateral_derivatives!(ws.dudpi, utils, ws.pi)
     jacobian_x!(ws.Fx, ws.pi, t, ws.dudpi, utils)
@@ -122,7 +122,7 @@ function correct!(
         _zero_nested!(ws.ubar)
 
         mu = splitviews(ws.x_nxt, size(first(utils)) .- 1)
-        point_to_strat!.(ws.pi, mu)
+        redlograt_to_prob!.(ws.pi, mu)
 
         unilateral_deviations!(ws.ubar, utils, ws.pi)
         residual!(ws.res, mu, ws.ubar, ws.x_nxt, t_out, utils)
@@ -175,11 +175,27 @@ function correct!(
     end
 end
 
-function hc(utils; max_iters=1000, init_x=uniform_xprofile(utils), init_t=0.0, end_t=1e6)
-    x = copy(init_x)
-    t = init_t
-    dx = zero(init_x)
-    dt = one(init_t)
+function validate_game(utils::NTuple{N, AbstractArray{F, N}}) where {F, N}
+    if N <= 1
+        throw(ArgumentError("A normal-form game must have at least 2 players; got N = $N."))
+    end
+
+    if any(isempty, utils)
+        throw(ArgumentError("Utility matrices cannot be empty."))
+    end
+
+    if !allequal(size, utils)
+        throw(DimensionMismatch("All utility matrices must have matching sizes. Received sizes: $(map(size, utils))"))
+    end
+end
+
+function nash(utils::NTuple{N, AbstractArray{F, N}}; max_iters=1000, end_t=1e6) where {F, N}
+    validate_game(utils)
+
+    x = uniform_xprofile(utils)
+    t = 0.0
+    dx = zero(x)
+    dt = 1.0
     ds = 0.01
     iteration = 0
     successes_in_row = 0
@@ -216,5 +232,8 @@ function hc(utils; max_iters=1000, init_x=uniform_xprofile(utils), init_t=0.0, e
         end
     end
 
-    return x
+    mu = splitviews(x, size(utils[1]) .- 1)
+    pi = redlograt_to_prob.(mu)
+
+    return pi
 end

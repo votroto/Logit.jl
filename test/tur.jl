@@ -14,29 +14,21 @@ Us = (
 
 ff(x,y)=(x-y)^2
 
-hc(Us)
+nash(Us)
 
 #A = [ff(x,y) for x in -1.0:0.5:1.0, y in -1.0:0.5:1.0]
 
 #Us = (A,-A)
-@time x1 = hc(Us)
-
-
-#A = [ff(x,y) for x in -1.0:0.2:1.0, y in -1.0:0.2:1.0]
+@time pi = nash(Us)
 #
-#Us = (A,-A)
-#@time x1 = hc(Us)
+#for p in eachindex(pi)
+#    println(round.(pi[p]; digits=5))
+#end
+#nothing
 
-
-
-mu = splitviews(x1, size(Us[1]) .- 1)
-pi = point_to_strat.(mu)
-
-for p in eachindex(pi)
-println(round.(pi[p]; digits=5))
-end
-nothing
-
+ b = [0.0 for i in 1:3, j in 1:1]
+#
+@time nash((b,b))
 
 #=
 [0.21543, 0.28827, 0.26213, 0.1211, 0.11307]

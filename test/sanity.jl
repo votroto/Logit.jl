@@ -56,7 +56,7 @@ function test_size(n)
     stats = @timed xys = hc(Us)
 
     mu = splitviews(xys, size(Us[1]) .- 1)
-    pi = point_to_strat.(mu)
+    pi = redlograt_to_strat.(mu)
 
     wstart = dot(pi[1],Us[1],pi[2]), dot(pi[1],Us[2],pi[2])
 
@@ -93,7 +93,7 @@ function test_size(n)
 
     stats.time, t
 end
-
+#=
 results = [(test_size(n),n) for n in 2:30 for i in 1:10]
 
 sizes = [n for ((th, tg), n) in results]
@@ -106,3 +106,4 @@ incs = Plot(; xlim=(0,maximum(sizes)), ylim=(0,round(maximum(ths),digits=3)), ti
 scatterplot!(incs, sizes, tgs, color=:red, name="Bilinear")
 scatterplot!(incs, sizes, ths, color=:blue, name="Continuation")
 display(incs)
+=#

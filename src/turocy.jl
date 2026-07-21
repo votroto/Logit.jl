@@ -189,7 +189,7 @@ function jacobian_l(
     J = Vector{eltype(x)}(undef, rsize)
 
     mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
+    pi = redlograt_to_prob.(mu)
 
     ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
     unilateral_deviations!(ubar, u, pi)
@@ -219,7 +219,7 @@ function residual(
     ubar = ntuple(i -> zeros(eltype(x), size(utils[i], i)), Val(N))
 
     mu = splitviews(x, size(first(utils)) .- 1)
-    pi = point_to_strat.(mu)
+    pi = redlograt_to_prob.(mu)
 
     unilateral_deviations!(ubar, utils, pi)
 
@@ -247,14 +247,14 @@ function jacobian_x!(J, pi, lam, dudpi, u::NTuple{N}) where {N}
                     end
 
                 else
-                    c = 0
-                    #dot(g, pi[l])
+                    c = 0.0
                     for m in eachindex(pi[l])
                         gm = (dudpi[i][l][j, m] - dudpi[i][l][end, m])
                         c += gm * pi[l][m]
                     end
 
-                    for m in 1:(size(u[i], i)-1)
+                    # FIX: Loop over player l's non-reference actions, not player i's
+                    for m in 1:(size(u[l], l)-1)
                         gm = (dudpi[i][l][j, m] - dudpi[i][l][end, m])
                         J[ij, lm] = -lam * pi[l][m] * (gm - c)
 
@@ -267,7 +267,7 @@ function jacobian_x!(J, pi, lam, dudpi, u::NTuple{N}) where {N}
         end
     end
 
-    J
+    return J
 end
 
 function jacobian_x(x, lam, u::NTuple{N}) where {N}
@@ -275,7 +275,7 @@ function jacobian_x(x, lam, u::NTuple{N}) where {N}
     J = zeros(length(x), length(x))
 
     mu = splitviews(x, size(first(u)) .- 1)
-    pi = point_to_strat.(mu)
+    pi = redlograt_to_prob.(mu)
 
     dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
     unilateral_derivatives!(dudpi, u, pi)

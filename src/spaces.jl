@@ -4,12 +4,10 @@ function splitviews(x::AbstractVector, js::NTuple{N,Int}) where {N}
     ntuple(i -> @view(x[(offs[i]+1):offs[i+1]]), N)
 end
 
-function point_to_strat!(y, x)
-    T = eltype(x)
+function redlograt_to_prob!(y::AbstractVector{F}, x::AbstractVector{F}) where F
+    c = maximum(x, init=zero(F))
 
-    c = max(zero(T), maximum(x))
-
-    denom = 0
+    denom = zero(F)
     @inbounds for i in eachindex(x)
         v = exp(x[i] - c)
         y[i] = v
@@ -25,13 +23,13 @@ function point_to_strat!(y, x)
     return y
 end
 
-function point_to_strat(x)
+function redlograt_to_prob(x::AbstractVector)
     y = similar(x, length(x)+1)
-    point_to_strat!(y, x)
+    redlograt_to_prob!(y, x)
 end
 
-function strat_to_point(y)
-    x = Vector{eltype(y)}(undef, length(y)-1)
+function prob_to_redlograt(y::AbstractVector)
+    x = similar(y, length(y)-1)
     for i in eachindex(x)
         x[i] = log(y[i] / y[end])
     end
