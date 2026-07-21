@@ -1,6 +1,15 @@
 # LogitNash.jl
 
+> Package is not registered yet -- it is not tested, and its API is not stable!
+
 Compute an epsilon Nash equilibrium of an N-player game.
+
+## Install
+
+Install the package directly from GitHub by running:
+```julia
+using Pkg; Pkg.add(url="https://github.com/votroto/LogitNash.jl")
+```
 
 ## Usage
 
@@ -18,14 +27,14 @@ Us = (
     randn(5, 5, 5, 5, 5)
 )
 
-pi, status = nash(Us)
+pi, status = nash(Us; stop_iters=1000, stop_t=1e6, stop_eps=1e-6)
 
 for p in eachindex(pi)
     println(round.(pi[p]; digits=5))
 end
 ```
 should print the strategies
-```
+```julia
 [0.21543, 0.28827, 0.26213, 0.1211, 0.11307]
 [0.0, 0.00699, 0.05883, 0.31778, 0.6164]
 [0.0, 0.0, 0.0, 0.73337, 0.26663]
@@ -36,7 +45,7 @@ should print the strategies
 ## Notes
 - *The project is a work-in-progress. Feedback is welcome, so is help.*
 - *The Jacobian Kernels are specialized per the number of players. The first time an N-player game is solved will incur a compilation time penalty.*
-- *There is no specialization for zero-sum games. Using a reasonable linear program will always be ten times faster.*
+- *There is no specialization for zero-sum games. A reasonable linear program will always be faster.*
 
 ## Acknowledgements
 
