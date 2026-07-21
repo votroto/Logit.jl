@@ -1,6 +1,5 @@
 
 
-# Helper function to generate nested loops and hoist probabilities for derivatives
 function build_deriv_loops(dims, idx, prev_p, p, q, N)
     d = dims[idx]
     var_ad = Symbol("a", d)
@@ -69,14 +68,10 @@ end
 
     exprs = []
 
-    # Put p and q on the OUTSIDE to prevent cache thrashing on the result matrices
     for p in 1:N
         for q in 1:N
             p == q && continue
-
-            # Loop dimensions N down to 1 (column-major friendly)
             dims = N:-1:1
-            # Pass `nothing` instead of `:one`
             inner_loops_expr = build_deriv_loops(dims, 1, nothing, p, q, N)
 
             push!(exprs, quote
@@ -90,10 +85,7 @@ end
     return Expr(:block, exprs...)
 end
 
-# Helper function to recursively generate the nested loops at compile-time.
-# It nests loops such that the smallest index is innermost to preserve
-# column-major memory access, while hoisting intermediate probability multiplications.
-function build_loops(i, dims, idx, prev_p, N)
+function build_deviation_loops(i, dims, idx, prev_p, N)
     d = dims[idx]
     var_ad = Symbol("a", d)
 
@@ -115,7 +107,7 @@ function build_loops(i, dims, idx, prev_p, N)
     else
         new_p = Symbol("p", d)
         p_expr = prev_p == :one ? :(pi[$d][$var_ad]) : :($prev_p * pi[$d][$var_ad])
-        inner_loop = build_loops(i, dims, idx + 1, new_p, N)
+        inner_loop = build_deviation_loops(i, dims, idx + 1, new_p, N)
 
         return quote
             for $var_ad in 1:size(U_i, $d)
@@ -152,7 +144,7 @@ under the mixed strategy profile `pi` without any heap allocations.
         dims = filter(k -> k != i, N:-1:1)
         var_ai = Symbol("a", i)
 
-        inner_loops_expr = build_loops(i, dims, 1, :one, N)
+        inner_loops_expr = build_deviation_loops(i, dims, 1, :one, N)
 
         push!(exprs, quote
             out_i = out[$i]
@@ -180,23 +172,6 @@ function jacobian_t!(J, ubar, mu, u)
     J
 end
 
-function jacobian_t(
-    x::Vector{F},
-    u::NTuple{N,Array{F,N}}
-) where {F,N}
-    rsize = sum(size(first(u), i) - 1 for i in eachindex(u))
-    J = Vector{eltype(x)}(undef, rsize)
-
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = redlograt_to_prob.(mu)
-
-    ubar = ntuple(i -> zeros(eltype(x), size(u[i], i)), Val(N))
-    unilateral_deviations!(ubar, u, pi)
-
-    jacobian_t!(J, ubar, mu, u)
-    J
-end
-
 function residual!(out, mu, ubar, x, lambda, u)
     idx = 1
     for p in eachindex(u)
@@ -208,79 +183,42 @@ function residual!(out, mu, ubar, x, lambda, u)
     out
 end
 
-function residual(
-    x::Vector{F},
-    t::F,
-    utils::NTuple{N,Array{F,N}}
-) where {F,N}
-    rsize = sum(size(first(utils), i) - 1 for i in eachindex(utils))
-    res = Vector{eltype(x)}(undef, rsize)
-    ubar = ntuple(i -> zeros(eltype(x), size(utils[i], i)), Val(N))
-
-    mu = splitviews(x, size(first(utils)) .- 1)
-    pi = redlograt_to_prob.(mu)
-
-    unilateral_deviations!(ubar, utils, pi)
-
-    residual!(res, mu, ubar, x, t, utils)
-end
-
-
 function jacobian_x!(J, pi, lam, dudpi, u::NTuple{N}) where {N}
-    ij = 1
+    eq_i = 1
 
-    for i in eachindex(u)           # equation player
-        for j in 1:(size(u[i], i)-1) # equation action (reference excluded)
+    for eq_p in eachindex(u)
+        for eq_a in 1:(size(u[eq_p], eq_p)-1)
+            pd_i = 1
 
-            lm = 1
+            for pd_p in eachindex(u)
+                if pd_p == eq_p
+                    # Own-player identity block
+                    for pd_a in 1:(size(u[eq_p], eq_p)-1)
+                        J[eq_i, pd_i] = (eq_a == pd_a)
 
-            for l in eachindex(u)  # differentiation player
-
-                if l == i
-                    # Own-player block:
-                    # ∂(μ_ij - λ(u_ij-u_ref))/∂μ_il
-                    # = identity because u does not depend on own strategy
-                    for m in 1:(size(u[i], i)-1)
-                        J[ij, lm] = (j == m) ? 1.0 : 0.0
-                        lm += 1
+                        pd_i += 1
                     end
-
                 else
                     c = 0.0
-                    for m in eachindex(pi[l])
-                        gm = (dudpi[i][l][j, m] - dudpi[i][l][end, m])
-                        c += gm * pi[l][m]
+                    for pd_a in eachindex(pi[pd_p])
+                        gm = (dudpi[eq_p][pd_p][eq_a, pd_a] - dudpi[eq_p][pd_p][end, pd_a])
+                        c += gm * pi[pd_p][pd_a]
                     end
 
-                    # FIX: Loop over player l's non-reference actions, not player i's
-                    for m in 1:(size(u[l], l)-1)
-                        gm = (dudpi[i][l][j, m] - dudpi[i][l][end, m])
-                        J[ij, lm] = -lam * pi[l][m] * (gm - c)
+                    for pd_a in 1:(size(u[pd_p], pd_p)-1)
+                        gm = (dudpi[eq_p][pd_p][eq_a, pd_a] - dudpi[eq_p][pd_p][end, pd_a])
+                        J[eq_i, pd_i] = -lam * pi[pd_p][pd_a] * (gm - c)
 
-                        lm += 1
+                        pd_i += 1
                     end
                 end
             end
 
-            ij += 1
+            eq_i += 1
         end
     end
 
     return J
-end
-
-function jacobian_x(x, lam, u::NTuple{N}) where {N}
-    # d F_ij / d mu_lk
-    J = zeros(length(x), length(x))
-
-    mu = splitviews(x, size(first(u)) .- 1)
-    pi = redlograt_to_prob.(mu)
-
-    dudpi = ntuple(p -> ntuple(q -> zeros(eltype(x), size(u[p], p), size(u[p], q)), N), N)
-    unilateral_derivatives!(dudpi, u, pi)
-
-    jacobian_x!(J, pi, lam, dudpi, u)
-    J
 end
 
 function uniform_xprofile(Us)
