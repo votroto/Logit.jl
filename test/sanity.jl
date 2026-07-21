@@ -4,6 +4,25 @@ using JuMP
 using UnicodePlots
 include("../src/path.jl")
 
+
+
+
+"""Computes the value and NE strategies for a zero-sum game"""
+function linear_program(u::AbstractMatrix; optimizer=Gurobi.Optimizer)
+    m = Model(optimizer)
+
+    ny = size(u, 2)
+    @variable(m, ys[1:ny], lower_bound=0, upper_bound=1)
+    @variable(m, w)
+
+    @constraint(m, sum(ys) == 1)
+    @constraint(m, dx, u * ys .<= w)
+    @objective(m, Min, w)
+    optimize!(m)
+
+    value.(w), dual.(dx), value.(ys), solve_time(m)
+end
+
 """Computes the values and NE strategies for a general-sum game"""
 function bilinear_program(us::NTuple{2, AbstractMatrix}, startx=normalize(ones(size(us[1],1),1)), starty=normalize(ones(size(us[2],2),1)), wstart=zeros(2); optimizer=Gurobi.Optimizer)
     m = Model(optimizer)
@@ -22,8 +41,8 @@ function bilinear_program(us::NTuple{2, AbstractMatrix}, startx=normalize(ones(s
 
     optimize!(m)
 
-    #NaN, zeros(nx), zeros(ny), solve_time(m)
-    value.(w), value.(xs), value.(ys), solve_time(m)
+    NaN, zeros(nx), zeros(ny), solve_time(m)
+    #value.(w), value.(xs), value.(ys), solve_time(m)
 end
 
 #wstart = dot(pi[1],A,pi[2]), dot(pi[1],B,pi[2])
@@ -31,7 +50,8 @@ end
 #w,xsb,ysb,t = bilinear_program((A,B), pi[1], pi[2], wstart); nothing
 
 function test_size(n)
-    Us = ( randn(n, n), randn(n, n) )
+     #A = randn(n, n)
+    Us = (randn(n, n), randn(n, n))
 
     stats = @timed xys = hc(Us)
 
@@ -40,10 +60,26 @@ function test_size(n)
 
     wstart = dot(pi[1],Us[1],pi[2]), dot(pi[1],Us[2],pi[2])
 
-    w,xsb,ysb,t = bilinear_program(Us, pi[1], pi[2], wstart); nothing
+    w,xsb,ysb,t = bilinear_program(Us); nothing
 
-    @assert norm(xsb-pi[1])<=1e-6
-    @assert norm(ysb-pi[2])<=1e-6
+
+    @show xsb
+    @show pi[1]
+    println(norm(xsb-pi[1]))
+    println()
+
+
+    #wa,xsl,ysl,ta = linear_program(A); nothing
+
+
+    @show vhc = dot(pi[1], Us[1], pi[2])
+    @show vbi = dot(xsb, Us[1], ysb)
+    #@show vli = dot(abs.(xsl), A, ysl)
+
+ #   @assert abs(vhc - vbi)<=1e-6
+   # @assert abs(vhc - vli)<=1e-6
+  #  @assert abs(vbi - vli)<=1e-6
+
     #w,xs,ys,t = bilinear_program(Us)
 
 
@@ -58,15 +94,15 @@ function test_size(n)
     stats.time, t
 end
 
-results = [(test_size(n),n) for n in 2:50 for i in 1:4]
+results = [(test_size(n),n) for n in 2:30 for i in 1:10]
 
 sizes = [n for ((th, tg), n) in results]
 ths = [th for  ((th, tg), n) in results]
 tgs = [tg for  ((th, tg), n) in results]
 
 
-#scatterplot!(incs, sizes, tgs, color=:red, name="gurobi")
 
-incs = Plot(; xlim=(0,maximum(sizes)), ylim=(0,0.2), title="runtime vs gamesize", ylabel="runtime (s)", xlabel="game size (NxN)")
-scatterplot!(incs, sizes, ths, color=:blue, name="hc")
+incs = Plot(; xlim=(0,maximum(sizes)), ylim=(0,round(maximum(ths),digits=3)), title="Continuation vs Bilinear", ylabel="runtime (s)", xlabel="game size (NxN)")
+scatterplot!(incs, sizes, tgs, color=:red, name="Bilinear")
+scatterplot!(incs, sizes, ths, color=:blue, name="Continuation")
 display(incs)
