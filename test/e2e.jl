@@ -116,8 +116,18 @@ function e2e_guessing()
     @test actual ≈ expect atol=1e-4
 end
 
+function e2e_constant()
+    payoffs = (zeros(3, 3), zeros(3, 3))
+    pi, status = nash(payoffs)
+
+    actual = util2d(payoffs, pi)
+    expect = util2d(payoffs, ([1/3, 1/3, 1/3], [1/3, 1/3, 1/3]))
+    @test actual ≈ expect atol=1e-4
+end
+
 @testset "Basic games with known solutions" begin
     e2e_battle_of_the_sexes()
+    e2e_constant()
     e2e_coordination_assurance()
     e2e_coordination_pure()
     e2e_coordination_wiki()
