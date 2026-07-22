@@ -3,7 +3,31 @@ include("../src/turocy.jl")
 include("../src/path.jl")
 
 using Random
-Random.seed!(3462345634)
+using LinearAlgebra
+
+function covariant_game(actions::NTuple{N,Int}, r) where {N}
+    @assert -1/(N-1) <= r <= 1
+
+    Σ = Matrix{Float64}(I, N, N)
+    for i in 1:N, j in 1:N
+        if i != j
+            Σ[i,j] = r
+        end
+    end
+
+    L = cholesky(Symmetric(Σ)).L
+
+    G = Array{Float64}(undef, actions..., N)
+
+    for I in CartesianIndices(actions)
+        @views G[Tuple(I)..., :] .= L * randn(N)
+    end
+
+    slices = eachslice(G, dims=N)
+    ntuple(i-> Array(slices[i]), N)
+end
+using Random
+#Random.seed!(3462345634)
 
 Us = (
     randn(5, 5, 5, 5, 5),
@@ -13,13 +37,26 @@ Us = (
     randn(5, 5, 5, 5, 5)
 )
 
-ff(x,y)=(x-y)^2
+
+Us10 = (
+    randn(10,10,10,10,10),
+    randn(10,10,10,10,10),
+    randn(10,10,10,10,10),
+    randn(10,10,10,10,10),
+    randn(10,10,10,10,10)
+)
+
+#ff(x,y)=(x-y)^2
+
 
 nash(Us)
-@time pi, status = nash(Us)
-for p in eachindex(pi)
-    println(round.(pi[p]; digits=5))
-end
+
+ut = covariant_game((10,10,10,10,10), -0.2)
+
+@time pi, status = nash(Us10)
+#for p in eachindex(pi)
+#    println(round.(pi[p]; digits=5))
+#end
 
 #=
 [0.21543, 0.28827, 0.26213, 0.1211, 0.11307]
