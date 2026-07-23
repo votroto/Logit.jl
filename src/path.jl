@@ -8,18 +8,10 @@ function max_deviation_incentive(ubar::NTuple{N}, pi::NTuple{N}) where N
 end
 
 function fast_lu!(A::Matrix{Float64}, ipiv::Vector{BlasInt})
-    m, n = size(A)
-    info = Ref{BlasInt}()
-    # Direct Fortran call to dgetrf (Double precision GETRF)
-    ccall((@blasfunc(dgetrf_), liblapack), Cvoid,
-        (Ref{BlasInt}, Ref{BlasInt}, Ptr{Float64},
-            Ref{BlasInt}, Ptr{BlasInt}, Ref{BlasInt}),
-        m, n, A, max(1, m), ipiv, info)
+    A, ipiv, info = LinearAlgebra.LAPACK.getrf!(A, ipiv)
 
-    if info[] > 0
-        throw(SingularException(info[]))
-    elseif info[] < 0
-        throw(ArgumentError("LAPACK dgetrf error"))
+    if info > 0
+        throw(SingularException(info))
     end
     return A
 end

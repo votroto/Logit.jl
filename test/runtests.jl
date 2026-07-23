@@ -4,4 +4,5 @@ using LinearAlgebra
 
 
 include("encoding.jl")
+include("kernels.jl")
 include("e2e.jl")
