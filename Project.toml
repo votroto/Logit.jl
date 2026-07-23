@@ -1,6 +1,6 @@
 name = "LogitNash"
 uuid = "56ed5f9e-c32e-46b8-b489-5928d745fddb"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["votroto <tomas.votroubek@outlook.com>"]
 
 [deps]
